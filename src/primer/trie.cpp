@@ -1,5 +1,6 @@
 #include "primer/trie.h"
 #include <string_view>
+#include <type_traits>
 #include "common/exception.h"
 
 namespace bustub {
@@ -12,15 +13,38 @@ auto Trie::Get(std::string_view key) const -> const T * {
   // nullptr. After you find the node, you should use `dynamic_cast` to cast it to `const TrieNodeWithValue<T> *`. If
   // dynamic_cast returns `nullptr`, it means the type of the value is mismatched, and you should return nullptr.
   // Otherwise, return the value.
+
+  std::shared_ptr<const TrieNode> sp_mv=root_; 
+  for(auto ch: key){
+    if(sp_mv->children_.find(ch)!=sp_mv->children_.end()){
+	  sp_mv=sp_mv->children_.find(ch)->second;
+    }else{
+      return nullptr;
+	}
+  }
+
+  if(!(sp_mv->is_value_node_)){
+    return nullptr;
+  }
+  
+  const auto* p_value_node = dynamic_cast<const TrieNodeWithValue<T>*>(sp_mv.get());
+  return const_cast<const T*>(p_value_node->value_.get()); 
 }
 
 template <class T>
-auto Trie::Put(std::string_view key, T value) const -> Trie {
+auto Trie::Put(std::string_view key, T& value) const -> Trie {
   // Note that `T` might be a non-copyable type. Always use `std::move` when creating `shared_ptr` on that value.
   throw NotImplementedException("Trie::Put is not implemented.");
 
   // You should walk through the trie and create new nodes if necessary. If the node corresponding to the key already
   // exists, you should create a new `TrieNodeWithValue`.
+
+
+}
+
+template <class T>
+auto Trie::Put(std::string_view key, T&& value) const -> Trie{
+  throw NotImplementedException("Trie::Put is not implemented.");
 }
 
 auto Trie::Remove(std::string_view key) const -> Trie {
