@@ -8,9 +8,12 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include<cassert>
+//#include <assert.h>
 
 namespace bustub {
 
@@ -59,6 +62,7 @@ class TrieNode {
   //
   // Note: if you want to convert `unique_ptr` into `shared_ptr`, you can use `std::shared_ptr<T>(std::move(ptr))`.
   virtual auto Clone() const -> std::unique_ptr<TrieNode> { return std::make_unique<TrieNode>(children_); }
+
 
   // A map of children, where the key is the next character in the key, and the value is the next TrieNode.
   std::map<char, std::shared_ptr<const TrieNode>> children_;
@@ -119,16 +123,7 @@ class Trie {
   // Put a new key-value pair into the trie. If the key already exists, overwrite the value.
   // Returns the new trie.
   template <class T>
-  auto Put(std::string_view key, T& value) const -> Trie;
-
-  template <class T>
-  auto Put(std::string_view key, T&& value) const -> Trie;
-
-/*You can't declare T& value and T value at the same time, because any lvalue being passed as argument
- * to a function can be implicity converted to a reference, so the ambiguity is unavoidable.
-  template <class T>
   auto Put(std::string_view key, T value) const -> Trie;
-*/
 
   // Remove the key from the trie. If the key does not exist, return the original trie.
   // Otherwise, returns the new trie.
