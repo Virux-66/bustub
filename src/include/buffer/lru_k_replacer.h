@@ -17,6 +17,8 @@
 #include <mutex>  // NOLINT
 #include <unordered_map>
 #include <vector>
+#include <climits>
+#include <chrono>
 
 #include "common/config.h"
 #include "common/macros.h"
@@ -30,10 +32,58 @@ class LRUKNode {
   /** History of last seen K timestamps of this page. Least recent timestamp stored in front. */
   // Remove maybe_unused if you start using them. Feel free to change the member variables as you want.
 
-  [[maybe_unused]] std::list<size_t> history_;
-  [[maybe_unused]] size_t k_;
-  [[maybe_unused]] frame_id_t fid_;
-  [[maybe_unused]] bool is_evictable_{false};
+  std::list<size_t> history_;
+  size_t k_;
+  frame_id_t fid_;
+  bool is_evictable_{false};
+  AccessType last_access_type_{AccessType::Unknown};
+public:
+  /**
+   * @brief a new LRUKNode
+   * @param frame_id  the frame id this LRUKNode tracks
+   * @param k  the k of LRU-K
+  */
+  LRUKNode()=default;
+  LRUKNode(frame_id_t frame_id, size_t k);
+
+  /**
+   * @brief Add a new access record to history_. If the size of history_
+   * is more than k_, the front time stamp should be popped, else we could 
+   * insert the time stamp into the tail directly.
+   * @param access_timestamp  the time stamp when this frame was accessed.
+  */
+  void AddAccessRecord(size_t access_timestamp);
+
+  /**
+   * @brief Set the status (evictable or non-evictable) of this frame.
+   * @param is_evictable Is this frame evictable.
+  */
+  void SetEvictable(bool is_evictable);
+
+  /**
+   * @brief Get the number of being accessed.
+  */
+  size_t GetAccessNum();
+
+  /**
+   * @brief Get the oldest time stamp
+  */
+  size_t GetOldestTimeStamp();
+
+  /**
+   * @brief Set the last access type
+  */
+  void SetAccessType(AccessType access_type);
+
+  /**
+   * @brief Get the last access type
+  */
+  AccessType GetAccessType();
+
+  /**
+   * @brief Return if this frame is evictable
+  */
+  bool IsEvictable();
 };
 
 /**
@@ -147,15 +197,22 @@ class LRUKReplacer {
    */
   auto Size() -> size_t;
 
+  /**
+   * Set the current_timestamp_ to be monotonic clock and return.
+   * For now, we assume the current_timestamp_ in microsecond.
+  */
+  size_t SetCurrentTimeStamp();
+
  private:
   // TODO(student): implement me! You can replace these member variables as you like.
   // Remove maybe_unused if you start using them.
-  [[maybe_unused]] std::unordered_map<frame_id_t, LRUKNode> node_store_;
-  [[maybe_unused]] size_t current_timestamp_{0};
-  [[maybe_unused]] size_t curr_size_{0};
-  [[maybe_unused]] size_t replacer_size_;
-  [[maybe_unused]] size_t k_;
-  [[maybe_unused]] std::mutex latch_;
+  std::unordered_map<frame_id_t, LRUKNode> node_store_;
+  size_t current_timestamp_{0};
+  size_t curr_size_{0};  // the size of evictable frame
+  size_t replacer_size_; //the maximum number of frames the LRUReplacer will be required to store
+  size_t k_;             // the k of LRU-K
+  std::mutex latch_;
+  std::mutex latch_timestamp_;
 };
 
 }  // namespace bustub
