@@ -197,12 +197,6 @@ class LRUKReplacer {
    */
   auto Size() -> size_t;
 
-  /**
-   * Set the current_timestamp_ to be monotonic clock and return.
-   * For now, we assume the current_timestamp_ in microsecond.
-  */
-  size_t SetCurrentTimeStamp();
-
  private:
   // TODO(student): implement me! You can replace these member variables as you like.
   // Remove maybe_unused if you start using them.
@@ -213,6 +207,14 @@ class LRUKReplacer {
   size_t k_;             // the k of LRU-K
   std::mutex latch_;
   std::mutex latch_timestamp_;
+
+  /**
+   * Set the current_timestamp_ to be monotonic clock and return.
+   * For now, we assume the current_timestamp_ in microsecond.
+  */
+  size_t SetCurrentTimeStamp();
+
+
 };
 
 }  // namespace bustub

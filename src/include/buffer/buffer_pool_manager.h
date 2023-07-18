@@ -61,6 +61,9 @@ class BufferPoolManager {
    * You should pick the replacement frame from either the free list or the replacer (always find from the free list
    * first), and then call the AllocatePage() method to get a new page id. If the replacement frame has a dirty page,
    * you should write it back to the disk first. You also need to reset the memory and metadata for the new page.
+   * 
+   * The situation that should call this function is that the users want to add new data to database.
+   * Because existed data have been full of page, we should create a new page.
    *
    * Remember to "Pin" the frame by calling replacer.SetEvictable(frame_id, false)
    * so that the replacer wouldn't evict the frame before the buffer pool manager "Unpin"s it.
@@ -181,17 +184,24 @@ class BufferPoolManager {
   /** Array of buffer pool pages. */
   Page *pages_;
   /** Pointer to the disk manager. */
-  DiskManager *disk_manager_ __attribute__((__unused__));
+  DiskManager *disk_manager_;
   /** Pointer to the log manager. Please ignore this for P1. */
-  LogManager *log_manager_ __attribute__((__unused__));
+  LogManager *log_manager_;
   /** Page table for keeping track of buffer pool pages. */
   std::unordered_map<page_id_t, frame_id_t> page_table_;
   /** Replacer to find unpinned pages for replacement. */
   std::unique_ptr<LRUKReplacer> replacer_;
   /** List of free frames that don't have any pages on them. */
   std::list<frame_id_t> free_list_;
-  /** This latch protects shared data structures. We recommend updating this comment to describe what it protects. */
+  /** This latch protects shared data structures. We recommend updating this comment to describe what it protects. 
+   * This object protects page_table_ from concurrency issue.
+  */
   std::mutex latch_;
+  /** This latch protects shared free_list_. Once getting free frame from list, should get the mutex first.*/
+  std::mutex free_list_latch_;
+
+  std::mutex alloc_latch_;
+  std::mutex dealloc_latach_;
 
   /**
    * @brief Allocate a page on disk. Caller should acquire the latch before calling this function.
@@ -203,7 +213,7 @@ class BufferPoolManager {
    * @brief Deallocate a page on disk. Caller should acquire the latch before calling this function.
    * @param page_id id of the page to deallocate
    */
-  void DeallocatePage(__attribute__((unused)) page_id_t page_id) {
+  void DeallocatePage(page_id_t page_id) {
     // This is a no-nop right now without a more complex data structure to track deallocated pages
   }
 

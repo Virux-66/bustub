@@ -27,6 +27,7 @@ namespace bustub {
  */
 class Page {
   // There is book-keeping information inside the page that should only be relevant to the buffer pool manager.
+  // frind class means BufferPoolManager can access its private member.
   friend class BufferPoolManager;
 
  public:
@@ -81,6 +82,27 @@ class Page {
   /** Zeroes out the data that is held within the page. */
   inline void ResetMemory() { memset(data_, OFFSET_PAGE_START, BUSTUB_PAGE_SIZE); }
 
+  /** Increase pin_count_. Since other processes except buffer_pool_manager
+   * should not access page directly, this method is private.
+  */
+ void AddPinCount(){ 
+    std::lock_guard<std::mutex> lock(pin_count_latch_);
+    pin_count_ += 1;
+  }
+
+  void DecPinCount(){
+    std::lock_guard<std::mutex> lock(pin_count_latch_);
+    pin_count_ -= 1;
+  }
+
+  /** This method not only resets data in page, but page's metadata*/
+  void ResetPage(){
+    ResetMemory();
+    page_id_ = INVALID_PAGE_ID;
+    pin_count_ = 0;
+    is_dirty_ = false;
+  }
+
   /** The actual data that is stored within a page. */
   // Usually this should be stored as `char data_[BUSTUB_PAGE_SIZE]{};`. But to enable ASAN to detect page overflow,
   // we store it as a ptr.
@@ -93,6 +115,8 @@ class Page {
   bool is_dirty_ = false;
   /** Page latch. */
   ReaderWriterLatch rwlatch_;
+  /** pin_count_ mutex*/
+  std::mutex pin_count_latch_;
 };
 
 }  // namespace bustub
