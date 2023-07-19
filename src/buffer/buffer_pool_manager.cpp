@@ -264,12 +264,31 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
 
 auto BufferPoolManager::AllocatePage() -> page_id_t { return next_page_id_++; }
 
-auto BufferPoolManager::FetchPageBasic(page_id_t page_id) -> BasicPageGuard { return {this, nullptr}; }
+auto BufferPoolManager::FetchPageBasic(page_id_t page_id) -> BasicPageGuard { 
+  Page* target_page = FetchPage(page_id);
+  return {this, target_page};
+  //return {this, nullptr}; 
+}
 
-auto BufferPoolManager::FetchPageRead(page_id_t page_id) -> ReadPageGuard { return {this, nullptr}; }
+auto BufferPoolManager::FetchPageRead(page_id_t page_id) -> ReadPageGuard { 
+  Page* target_page = FetchPage(page_id);
+  if(target_page != nullptr){
+    target_page->rwlatch_.RLock();
+  }
+  return {this, target_page};
+}
 
-auto BufferPoolManager::FetchPageWrite(page_id_t page_id) -> WritePageGuard { return {this, nullptr}; }
+auto BufferPoolManager::FetchPageWrite(page_id_t page_id) -> WritePageGuard { 
+  Page* target_page = FetchPage(page_id);
+  if(target_page != nullptr){
+    target_page->rwlatch_.WLock();
+  }
+  return {this, target_page};
+}
 
-auto BufferPoolManager::NewPageGuarded(page_id_t *page_id) -> BasicPageGuard { return {this, nullptr}; }
+auto BufferPoolManager::NewPageGuarded(page_id_t *page_id) -> BasicPageGuard {
+  Page* target_page = NewPage(page_id);
+  return {this, target_page};
+}
 
 }  // namespace bustub
