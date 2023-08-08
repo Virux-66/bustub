@@ -123,6 +123,8 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, AccessType access_type) -> 
       Page* target_page = pages_ + frame_id;
 
       target_page->ResetPage();
+      // DEBUG: Should set page id for target_page
+      target_page->ResetPageId(page_id);
       target_page->AddPinCount();
 
       /** Read data from disk to buffer pool*/
@@ -152,6 +154,8 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, AccessType access_type) -> 
 
     /** After writing dirty data to disk, we can reset this page.*/
     target_page->ResetPage();
+    // DEBUG: Should set page id for target_page
+    target_page->ResetPageId(page_id);
     target_page->AddPinCount();
 
     target_page->page_id_ = page_id;
@@ -272,17 +276,22 @@ auto BufferPoolManager::FetchPageBasic(page_id_t page_id) -> BasicPageGuard {
 
 auto BufferPoolManager::FetchPageRead(page_id_t page_id) -> ReadPageGuard { 
   Page* target_page = FetchPage(page_id);
+  // Should not get the lock here. 
+  /*
   if(target_page != nullptr){
     target_page->rwlatch_.RLock();
   }
+  */
   return {this, target_page};
 }
 
 auto BufferPoolManager::FetchPageWrite(page_id_t page_id) -> WritePageGuard { 
   Page* target_page = FetchPage(page_id);
+  /*
   if(target_page != nullptr){
     target_page->rwlatch_.WLock();
   }
+  */
   return {this, target_page};
 }
 

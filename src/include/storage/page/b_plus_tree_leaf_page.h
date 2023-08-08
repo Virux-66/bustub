@@ -58,6 +58,20 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   auto GetNextPageId() const -> page_id_t;
   void SetNextPageId(page_id_t next_page_id);
   auto KeyAt(int index) const -> KeyType;
+  auto ValueAt(int index) const -> ValueType;
+  
+  /** 
+   * @brief Insert a mapping via binary search
+   */
+  auto PlaceMapping(const KeyType& key, const ValueType& value, KeyComparator comparator) -> bool;
+
+  /**
+   * @brief Use binary search to find a key that is equal to target key
+   * @param key the key to be found
+   * @return return -1 if the key is not in the leaf page.
+   *          else return index ranging from 0 to GetSize()-1
+  */
+  auto SearchKey(KeyType key, KeyComparator comparator) const -> int;
 
   /**
    * @brief for test only return a string representing all keys in

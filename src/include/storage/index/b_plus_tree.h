@@ -47,6 +47,8 @@ class Context {
   // Save the root page id here so that it's easier to know if the current page is the root page.
   page_id_t root_page_id_{INVALID_PAGE_ID};
 
+  std::deque<BasicPageGuard> basic_set_;
+
   // Store the write guards of the pages that you're modifying here.
   std::deque<WritePageGuard> write_set_;
 
@@ -137,6 +139,11 @@ class BPlusTree {
   std::vector<std::string> log;  // NOLINT
   int leaf_max_size_;
   int internal_max_size_;
+  /**
+   * This page id doesn't pertain to B+ tree root page id.
+   * It points to a meta-page, whose data include the page id of
+   * B+ tree root page.
+  */
   page_id_t header_page_id_;
 };
 

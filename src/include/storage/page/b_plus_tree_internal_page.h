@@ -74,6 +74,31 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   auto ValueAt(int index) const -> ValueType;
 
   /**
+   * @param index the index
+   * @param value the new value
+  */
+  void SetValueAt(int index, ValueType value);
+
+  /**
+   * @brief Since PlaceMapping places mapping among [1,maxsize-1]
+   * this function set the head mapping whose key is invalied.
+  */
+  auto PlaceHead(const ValueType& value) -> bool;
+
+  /** 
+   * @brief Insert a mapping via binary search.
+   */
+  auto PlaceMapping(const KeyType& key, const ValueType& value, KeyComparator comparator) -> bool;
+
+  /**
+   * @brief Use binary search to find a minimum key that
+   *        is greater than or equal to the target key.
+   * @param key the key to be found
+   * @return from 0 to GetSize() - 1
+  */
+  auto SearchKey(KeyType key, KeyComparator comparator) const -> int;
+
+  /**
    * @brief For test only, return a string representing all keys in
    * this internal page, formatted as "(key1,key2,key3,...)"
    *

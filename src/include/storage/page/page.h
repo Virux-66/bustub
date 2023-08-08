@@ -52,6 +52,8 @@ class Page {
   /** @return true if the page in memory has been modified from the page on disk, false otherwise */
   inline auto IsDirty() -> bool { return is_dirty_; }
 
+  inline auto SetDirty() -> void { is_dirty_ = true;}
+
   /** Acquire the page write latch. */
   inline void WLatch() { rwlatch_.WLock(); }
 
@@ -101,6 +103,10 @@ class Page {
     page_id_ = INVALID_PAGE_ID;
     pin_count_ = 0;
     is_dirty_ = false;
+  }
+
+  void ResetPageId(page_id_t page_id){
+    page_id_ = page_id;
   }
 
   /** The actual data that is stored within a page. */

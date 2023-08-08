@@ -60,8 +60,8 @@ auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & 
 }
 
 void ReadPageGuard::Drop() {
-    guard_.Drop();
     guard_.page_->RUnlatch();
+    guard_.Drop();
 }
 
 ReadPageGuard::~ReadPageGuard() {
@@ -84,8 +84,8 @@ auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard
 }
 
 void WritePageGuard::Drop() {
-    guard_.Drop();
     guard_.page_->WUnlatch();
+    guard_.Drop();
 }
 
 WritePageGuard::~WritePageGuard() {

@@ -46,6 +46,7 @@ class BPlusTreePage {
   ~BPlusTreePage() = delete;
 
   auto IsLeafPage() const -> bool;
+  auto IsEmpty() const -> bool;
   void SetPageType(IndexPageType page_type);
 
   auto GetSize() const -> int;
@@ -58,9 +59,10 @@ class BPlusTreePage {
 
  private:
   // member variable, attributes that both internal and leaf page share
-  IndexPageType page_type_ __attribute__((__unused__));
-  int size_ __attribute__((__unused__));
-  int max_size_ __attribute__((__unused__));
+  IndexPageType page_type_;
+  int size_;
+  int max_size_;
+  int min_size_;
 };
 
 }  // namespace bustub

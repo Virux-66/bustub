@@ -17,6 +17,9 @@ BPLUSTREE_TYPE::BPlusTree(std::string name, page_id_t header_page_id, BufferPool
       leaf_max_size_(leaf_max_size),
       internal_max_size_(internal_max_size),
       header_page_id_(header_page_id) {
+  
+  bpm_->NewPage(&header_page_id);
+
   WritePageGuard guard = bpm_->FetchPageWrite(header_page_id_);
   auto root_page = guard.AsMut<BPlusTreeHeaderPage>();
   root_page->root_page_id_ = INVALID_PAGE_ID;
@@ -26,7 +29,20 @@ BPLUSTREE_TYPE::BPlusTree(std::string name, page_id_t header_page_id, BufferPool
  * Helper function to decide whether current b+tree is empty
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::IsEmpty() const -> bool { return true; }
+auto BPLUSTREE_TYPE::IsEmpty() const -> bool {
+  /**Here, instead of maintaining the number of leaf page because of
+   * potential performance bottlenack, we assume that header page always
+   * stays in memory, such that we can get root page and reinterpret it 
+   * to BPlusTreePage to get its size_ member.
+  */ 
+  //auto root_page_id = GetRootPageId();
+  BasicPageGuard header_page = bpm_->FetchPageBasic(header_page_id_);
+  auto* header_page_data = header_page.As<BPlusTreeHeaderPage>();
+  auto root_page_id = header_page_data->root_page_id_;
+  BasicPageGuard root_page = bpm_->FetchPageBasic(root_page_id);
+  auto* root_page_data = root_page.As<BPlusTreePage>();
+  return (root_page_data->GetSize() == 0);
+}
 /*****************************************************************************
  * SEARCH
  *****************************************************************************/
@@ -37,10 +53,41 @@ auto BPLUSTREE_TYPE::IsEmpty() const -> bool { return true; }
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result, Transaction *txn) -> bool {
+
+  // If this B+ Tree is empty, then just return.  
+  if(IsEmpty()){
+    return false;
+  }
+  
   // Declaration of context instance.
   Context ctx;
   (void)ctx;
-  return false;
+  auto probe_page_id = GetRootPageId();
+  bool found = false;
+  while(true){
+	  // ReadPageGuard probe_page = bpm_->FetchPageRead(probe_page_id);
+    BasicPageGuard probe_page = bpm_->FetchPageBasic(probe_page_id);
+  	const auto* probe_page_data = probe_page.As<BPlusTreePage>();
+
+    if(probe_page_data->IsLeafPage()){
+      const auto* leaf_data = probe_page.As<LeafPage>();
+ 			int index = leaf_data->SearchKey(key, comparator_);
+			if(index != -1){
+				result->push_back(leaf_data->ValueAt(index));
+				found = true;
+			}
+			break;
+    }
+    const auto* internal_data = probe_page.As<InternalPage>(); 
+		int index = internal_data->SearchKey(key, comparator_);		
+    /**
+     * Since SearchKey finds a minimum key that is greater than the target key
+     * we should get its left pointer.
+     */
+    probe_page_id = internal_data->ValueAt(index - 1);
+  }
+
+  return found;
 }
 
 /*****************************************************************************
@@ -58,7 +105,229 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   // Declaration of context instance.
   Context ctx;
   (void)ctx;
-  return false;
+
+  BasicPageGuard header_page = bpm_->FetchPageBasic(header_page_id_);
+  auto* header_page_data = header_page.AsMut<BPlusTreeHeaderPage>();
+  // Root page is invalided, which indicates the B+ tree is empty.
+  if(header_page_data->root_page_id_ == INVALID_PAGE_ID){
+    // If B+ tree is empty, we need allocate a new page for root.
+    page_id_t new_page_id;
+    bpm_->NewPageGuarded(&new_page_id);
+    BasicPageGuard new_page = bpm_->FetchPageBasic(new_page_id);
+    // The root page will be Leaf page.
+    auto* new_page_data = new_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
+
+    new_page_data->Init();
+
+    new_page_data->PlaceMapping(key, value, comparator_);
+    // place a new mapping, the leaf page is dirty now.
+    new_page.SetDirty();
+    // update root page id
+    header_page_data->root_page_id_ = new_page_id;
+
+    return true;
+  }
+
+  // There are at least one node.
+  page_id_t probe_page_id = header_page_data->root_page_id_;
+  BasicPageGuard probe_page = bpm_->FetchPageBasic(probe_page_id);
+  auto* probe_page_data = probe_page.AsMut<BPlusTreePage>();
+
+  // Another implementation.
+  while(true){
+    if(probe_page_data->IsLeafPage()){
+      break;
+    }
+    auto* probe_internal_page = probe_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
+    int index = probe_internal_page->SearchKey(key, comparator_);
+
+    // Track the accessed pages
+    ctx.basic_set_.push_back(std::move(probe_page));
+
+    // The return value is the minimum greater than the target key.
+    probe_page_id = probe_internal_page->ValueAt(index - 1);
+    probe_page = bpm_->FetchPageBasic(probe_page_id);
+    probe_page_data = probe_page.AsMut<BPlusTreePage>();
+  }
+
+  // After breaking, the probe_page_data is actually a BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>
+
+  auto* leaf_page_data = probe_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
+  
+  //if(leaf_page_data->GetSize() < leaf_page_data->GetMaxSize() - 1){
+  if(leaf_page_data->GetSize() < leaf_max_size_){
+    // The leaf page need not split, so just insert
+    leaf_page_data->PlaceMapping(key, value, comparator_);
+    probe_page.SetDirty();
+
+    while(!ctx.basic_set_.empty()){
+      ctx.basic_set_.pop_back();
+    }
+  }else if(probe_page_id == header_page_data->root_page_id_){
+    // Edge case: There is only node, which is root node and need split.
+
+    // Step 1. Request a new page.
+    page_id_t root_sibling_id;
+    bpm_->NewPageGuarded(&root_sibling_id);
+    BasicPageGuard root_sibling_page = bpm_->FetchPageBasic(root_sibling_id);
+    auto* root_sibling_data = root_sibling_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
+
+    // Step 2. Split the overflow page.
+    int divide_index = (leaf_max_size_ - 1)/2;
+    for(int i = divide_index + 1; i < leaf_max_size_; i++){
+      root_sibling_data->PlaceMapping(leaf_page_data->KeyAt(i), leaf_page_data->ValueAt(i), comparator_);
+    }
+    //leaf_page_data->IncreaseSize(leaf_max_size_ - divide_index - 1);
+    leaf_page_data->SetSize(divide_index + 1);
+
+    // Step 3. Insert new key-value
+    if(comparator_(root_sibling_data->KeyAt(0), key) != 1){   // root_sibling_data->KeyAt(0) <= key
+      root_sibling_data->PlaceMapping(key, value, comparator_);
+    }else{
+      leaf_page_data->PlaceMapping(key, value, comparator_);
+    }
+
+    // Step 4. Update the splited page metainfomation
+    root_sibling_data->SetPageType(IndexPageType::LEAF_PAGE);
+    root_sibling_data->SetNextPageId(leaf_page_data->GetNextPageId());
+    leaf_page_data->SetNextPageId(root_sibling_id);
+    probe_page.SetDirty();
+    root_sibling_page.SetDirty();
+    //leaf_page_data->SetSize(divide_index + 1);
+
+    // Step 5. update root page. Get the right new page
+    //auto new_internal_node = std::make_pair(leaf_page_data->KeyAt(leaf_page_data->GetSize() - 1), root_sibling_id);
+    // root_sibling_data is leaf page
+    auto new_internal_node = std::make_pair(root_sibling_data->KeyAt(0), root_sibling_id);
+
+    page_id_t new_root_id;
+    bpm_->NewPageGuarded(&new_root_id);
+    BasicPageGuard root_page = bpm_->FetchPageBasic(new_root_id);
+    auto* root_data = root_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
+    root_data->PlaceHead(header_page_data->root_page_id_);
+    root_data->PlaceMapping(new_internal_node.first, new_internal_node.second, comparator_);
+    header_page_data->root_page_id_ = new_root_id;
+    root_page.SetDirty();
+
+  }else{
+    // The leaf page would split. Handle carefully.
+
+    // Step 1. Request a new page
+    page_id_t new_page_id;
+    bpm_->NewPageGuarded(&new_page_id);
+    BasicPageGuard new_page = bpm_->FetchPageBasic(new_page_id);
+    auto* new_page_data = new_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
+
+    // Step 2. Split the overflow page. 
+    // [0,divide_index] stay still, while [divide_point + 1, GetMaxSize-1] are put new leaf page.
+    // Due to this division method, left page will be at least equal to the right page.
+    //int divide_index = (leaf_page_data->GetMaxSize() - 1)/2;
+    int divide_index = (leaf_max_size_ - 1)/2;
+    for(int i = divide_index + 1; i < leaf_max_size_; i++){
+      new_page_data->PlaceMapping(leaf_page_data->KeyAt(i), leaf_page_data->ValueAt(i), comparator_);
+    }
+    //leaf_page_data->IncreaseSize(leaf_max_size_ - divide_index -1);
+    leaf_page_data->SetSize(divide_index + 1);
+
+    // Step 3. insert new key-value.
+    if(comparator_(new_page_data->KeyAt(0), key) != 1){     // new_page_data->KeyAt(0) <= key
+      new_page_data->PlaceMapping(key, value, comparator_);
+    }else{
+      leaf_page_data->PlaceMapping(key, value, comparator_);
+    }
+
+    // Step 4. Update the split page metainfomation
+    new_page_data->SetPageType(IndexPageType::LEAF_PAGE);
+    new_page_data->SetNextPageId(leaf_page_data->GetNextPageId());
+    leaf_page_data->SetNextPageId(new_page_id);
+    probe_page.SetDirty();
+    new_page.SetDirty();
+
+    // Step 5. Update internal pages recurively with leaf_page_data and new_page_data
+    // The division point is leaf_page_data[GetSize() - 1];
+    auto new_internal_node = std::make_pair(new_page_data->KeyAt(0), new_page_id);
+    bool root_splited = true;
+    std::pair<KeyType, page_id_t> root_sibling;
+    while(!ctx.basic_set_.empty()){
+      BasicPageGuard tracked_internal_page(std::move(ctx.basic_set_.back()));
+      ctx.basic_set_.pop_back();
+      auto* tracked_internal_data = tracked_internal_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
+
+      if(tracked_internal_data->GetSize() < internal_max_size_){
+        root_splited = false;
+        tracked_internal_data->PlaceMapping(new_internal_node.first, new_internal_node.second, comparator_);
+        tracked_internal_page.SetDirty();
+        // release all BasicPageGuard
+        while(!ctx.basic_set_.empty()){
+          ctx.basic_set_.pop_back();
+        }
+        break;
+      }else{
+        // Split the internal page. This is very similar to leaf page split.
+        // Step 1. Request a new page.
+        page_id_t new_page_id;
+        bpm_->NewPageGuarded(&new_page_id);
+        BasicPageGuard new_page = bpm_->FetchPageBasic(new_page_id);
+        auto* new_page_data = new_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
+
+        // Step 2. Split the overflow page.
+        //int divide_index = tracked_internal_data->GetMaxSize()/2;
+        int divide_index = internal_max_size_/2;
+
+        // This head element is temporary.
+        new_page_data->IncreaseSize(1);
+        for(int i = divide_index + 1; i < internal_max_size_; i++){
+          new_page_data->PlaceMapping(tracked_internal_data->KeyAt(i), tracked_internal_data->ValueAt(i), comparator_);
+          tracked_internal_data->IncreaseSize(-1);
+        }
+
+        // Step 3. Insert new key-value
+        if(comparator_(new_page_data->KeyAt(1), key) != 1){     // new_page_data->KeyAt(1) <= key
+          new_page_data->PlaceMapping(new_internal_node.first, new_internal_node.second, comparator_);
+        }else{
+          tracked_internal_data->PlaceMapping(new_internal_node.first, new_internal_node.second, comparator_);
+        }
+
+        // Step 4. Update new_internal_node to be passed along the B+ Tree
+        // division point is either tracked_interal_data[Getsize() - 1] or new_page_data[1]
+        if(new_page_data->GetSize() >= tracked_internal_data->GetSize()){
+          new_internal_node = std::make_pair(new_page_data->KeyAt(1), new_page_id);
+          new_page_data->SetValueAt(0, new_page_data->ValueAt(1));
+          for(int k = 1; k < new_page_data->GetSize() - 1; k++){
+            new_page_data->SetKeyAt(k, new_page_data->KeyAt(k + 1));
+            new_page_data->SetValueAt(k, new_page_data->ValueAt(k + 1));
+          }
+          new_page_data->IncreaseSize(-1);
+        }else{
+          new_internal_node = std::make_pair(tracked_internal_data->KeyAt(tracked_internal_data->GetSize() - 1), new_page_id);
+          new_page_data->SetValueAt(0, tracked_internal_data->ValueAt(tracked_internal_data->GetSize() - 1));
+          tracked_internal_data->IncreaseSize(-1);
+        }
+        
+        //Set tracked_internal_data and new_page dirty
+        tracked_internal_page.SetDirty();
+        new_page.SetDirty();
+
+        // Since every new_internal_node might be division node of root, we should keep it.
+        root_sibling = new_internal_node;
+      }
+    }
+    // The last step. Check whether the root is splited.
+    // After basic_set_ is empty, it's possible that the root also need split.
+    if(root_splited){
+      page_id_t new_root_id;
+      page_id_t old_root_id = header_page_data->root_page_id_;
+      bpm_->NewPageGuarded(&new_root_id);
+      BasicPageGuard new_root_page = bpm_->FetchPageBasic(new_root_id);
+      auto* new_root_data = new_root_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
+      new_root_data->PlaceHead(old_root_id);
+      new_root_data->PlaceMapping(root_sibling.first, root_sibling.second, comparator_); 
+      new_root_page.SetDirty();
+      // Update header page to new root page id.
+      header_page_data->root_page_id_ = new_root_id;
+    }
+  }
+  return true;
 }
 
 /*****************************************************************************
@@ -109,7 +378,13 @@ auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE(); 
  * @return Page id of the root of this tree
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t { return 0; }
+auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t {
+  // Get the B+ tree header page data from buffer pool manager.
+  BasicPageGuard header_page = bpm_->FetchPageBasic(header_page_id_);
+  auto* header_page_data = header_page.As<BPlusTreeHeaderPage>();
+  // root_page_id_ is pulibc member in BPlusTreeHeaderPage
+  return header_page_data->root_page_id_;
+}
 
 /*****************************************************************************
  * UTILITIES AND DEBUG
