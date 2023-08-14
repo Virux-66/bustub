@@ -345,6 +345,82 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
   // Declaration of context instance.
   Context ctx;
   (void)ctx;
+  BasicPageGuard header_page = bpm_->FetchPageBasic(header_page_id_);
+  auto* header_page_data = header_page.AsMut<BPlusTreeHeaderPage>();
+  if(header_page_data->root_page_id_ == INVALID_PAGE_ID){
+    // The tree is empty, return immediately.
+    return;
+  }
+
+  // Find the key along the tree
+  page_id_t probe_page_id = header_page_data->root_page_id_;
+  BasicPageGuard probe_page = bpm_->FetchPageBasic(probe_page_id);
+  auto* probe_page_data = probe_page.AsMut<BPlusTreePage>();
+  while(true){
+    if(probe_page_data->IsLeafPage()){
+      break;
+    }
+    auto* probe_internal_page = probe_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
+    int index = probe_internal_page->SearchKey(key, comparator_);
+
+    // Track the accessed pages
+    ctx.basic_set_.push_back(std::move(probe_page));
+
+    probe_page_id = probe_internal_page->ValueAt(index - 1);
+    probe_page = bpm_->FetchPageBasic(probe_page_id);
+    probe_page_data = probe_page.AsMut<BPlusTreePage>();
+  }
+
+  auto* leaf_page_data = probe_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
+  int del_index = leaf_page_data->SearchKey(key, comparator_);
+  leaf_page_data->Remove(del_index);
+  probe_page.SetDirty();
+
+  // Check if the deletion break the balance properity 
+  if(leaf_page_data->GetSize() < leaf_max_size_/2){
+    // Check if the leaf page is the root page.
+    if(probe_page_id == header_page_data->root_page_id_){
+      // Check if the deletion is the last node.
+      if(leaf_page_data->GetSize() == 0){
+        header_page_data->root_page_id_ = INVALID_PAGE_ID;
+      }
+    }else{
+      BasicPageGuard tracked_internal_page(std::move(ctx.basic_set_.back()));
+      ctx.basic_set_.pop_back();
+      auto* tracked_internal_data = tracked_internal_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
+
+      // Check if borrow from sibling.
+      BPlusTreeLeafPage<keyType, ValueType, KeyComparator>* left_data = nullptr;
+      BPlusTreeLeafPage<keyType, ValueType, KeyComparator>* right_data = nullptr;
+      int key_idx = tracked_internal_data->SearchKey(key, comparator_) - 1;
+      if(key_idx - 1 >= 0){
+        page_id_t left_sibling_page_id = tracked_internal_data->ValueAt(key_idx - 1);
+        BasicPageGuard page_guard = bpm_->FetchPageBasic(left_sibling_page_id);
+        left_data = page_guard.AsMut<LeafPage>();
+      } 
+      if(key_idx + 1 <= internal_max_size_-1){
+        page_id_t right_sibling_page_id = tracked_internal_data->ValueAt(key_idx + 1);
+        BasicPageGuard page_guard = bpm_->FetchPageBasic(right_sibling_page_id);
+        right_data = page_guard.AsMut<LeafPage>();
+      }
+      if(left_data != nullptr || right_data != nullptr){
+        // Probably can borrow from sibling page.
+        // check if leaf sibling can be borrowed?
+        if(left_data->GetSize() > leaf_max_size_/2){
+          // borrow from left sibling
+          // TODO
+        }else if(right_data->GetSize() > leaf_max_size_/2){
+          // borrow from right sibling   
+          // TODO
+        }
+      }else{
+        // Abosolutly can't borrow from sibling page.
+        // TODO
+      }
+
+    }
+  }
+  return;
 }
 
 /*****************************************************************************
