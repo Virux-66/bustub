@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "storage/page/b_plus_tree_page.h"
+#include "storage/index/index_iterator.h"
 
 namespace bustub {
 
@@ -43,6 +44,8 @@ namespace bustub {
 INDEX_TEMPLATE_ARGUMENTS
 class BPlusTreeLeafPage : public BPlusTreePage {
  public:
+  template<typename T, typename X, typename Z> friend class IndexIterator;
+  //friend class IndexIterator<KeyType, ValueType, KeyComparator>;
   // Delete all constructor / destructor to ensure memory safety
   BPlusTreeLeafPage() = delete;
   BPlusTreeLeafPage(const BPlusTreeLeafPage &other) = delete;

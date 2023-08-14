@@ -356,7 +356,22 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
  * @return : index iterator
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE(); }
+auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
+  BasicPageGuard header_page = bpm_->FetchPageBasic(header_page_id_);
+  auto* header_page_data = header_page.As<BPlusTreeHeaderPage>();
+  page_id_t probe_page_id = header_page_data->root_page_id_;
+  BasicPageGuard probe_page = bpm_->FetchPageBasic(probe_page_id);
+  auto* probe_page_data = probe_page.AsMut<BPlusTreePage>();
+  while(!probe_page_data->IsLeafPage()){
+    auto* probe_page_internal_data = probe_page.AsMut<InternalPage>();
+    page_id_t next_page_id = probe_page_internal_data->ValueAt(0);
+    probe_page_id = next_page_id;
+    probe_page = bpm_->FetchPageBasic(probe_page_id);
+    probe_page_data = probe_page.AsMut<BPlusTreePage>();
+  }
+
+  return INDEXITERATOR_TYPE(probe_page_id, 0, std::move(probe_page), bpm_);
+}
 
 /*
  * Input parameter is low key, find the leaf page that contains the input key
@@ -364,7 +379,25 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE()
  * @return : index iterator
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE(); }
+auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
+  BasicPageGuard header_page = bpm_->FetchPageBasic(header_page_id_);
+  auto* header_page_data = header_page.As<BPlusTreeHeaderPage>();
+  page_id_t probe_page_id = header_page_data->root_page_id_;
+  BasicPageGuard probe_page = bpm_->FetchPageBasic(probe_page_id);
+  auto* probe_page_data = probe_page.AsMut<BPlusTreePage>();
+  while(!probe_page_data->IsLeafPage()){
+    auto* probe_page_internal_data = probe_page.AsMut<InternalPage>();
+    int idx = probe_page_internal_data->SearchKey(key, comparator_);
+    page_id_t next_page_id = probe_page_internal_data->ValueAt(idx - 1);
+    probe_page_id = next_page_id;
+    probe_page = bpm_->FetchPageBasic(probe_page_id);
+    probe_page_data = probe_page.AsMut<BPlusTreePage>();
+  }
+  auto* leaf_page_data = probe_page.AsMut<LeafPage>();
+  int idx = leaf_page_data->SearchKey(key, comparator_);
+
+  return INDEXITERATOR_TYPE(probe_page_id, idx, std::move(probe_page), bpm_);
+}
 
 /*
  * Input parameter is void, construct an index iterator representing the end
@@ -372,7 +405,23 @@ auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE { return IN
  * @return : index iterator
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE(); }
+auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE {
+  BasicPageGuard header_page = bpm_->FetchPageBasic(header_page_id_);
+  auto* header_page_data = header_page.As<BPlusTreeHeaderPage>();
+  page_id_t probe_page_id = header_page_data->root_page_id_;
+  BasicPageGuard probe_page = bpm_->FetchPageBasic(probe_page_id);
+  auto* probe_page_data = probe_page.AsMut<BPlusTreePage>();
+  while(!probe_page_data->IsLeafPage()){
+    auto* probe_page_internal_data = probe_page.AsMut<InternalPage>();
+    page_id_t next_page_id = probe_page_internal_data->ValueAt(probe_page_internal_data->GetSize() - 1);
+    probe_page_id = next_page_id;
+    probe_page = bpm_->FetchPageBasic(probe_page_id);
+    probe_page_data = probe_page.AsMut<BPlusTreePage>();
+  }
+
+  //auto* leaf_page_data = probe_page.AsMut<LeafPage>();
+  return INDEXITERATOR_TYPE(probe_page_id, probe_page_data->GetSize());
+}
 
 /**
  * @return Page id of the root of this tree
