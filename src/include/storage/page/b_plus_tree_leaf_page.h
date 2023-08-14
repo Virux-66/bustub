@@ -77,6 +77,13 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   auto SearchKey(KeyType key, KeyComparator comparator) const -> int;
 
   /**
+   * @brief Delete a pair in leaf page.
+   * @param int offset
+   * @return true if success, else false if fail
+  */
+  auto Remove(int offset) -> bool;
+
+  /**
    * @brief for test only return a string representing all keys in
    * this leaf page formatted as "(key1,key2,key3,...)"
    *

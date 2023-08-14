@@ -152,6 +152,18 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::SearchKey(KeyType key, KeyComparator comparator
   return pos;
 }
 
+INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::Remove(int offset) -> bool{
+  if(offset >= GetSize()){
+    return false;
+  }
+  for(int i = offset; i < GetSize() - 1; i++){
+    array_[i] = array_[i + 1];
+  }
+  IncreaseSize(-1); 
+  return true;
+}
+
 template class BPlusTreeLeafPage<GenericKey<4>, RID, GenericComparator<4>>;
 template class BPlusTreeLeafPage<GenericKey<8>, RID, GenericComparator<8>>;
 template class BPlusTreeLeafPage<GenericKey<16>, RID, GenericComparator<16>>;
