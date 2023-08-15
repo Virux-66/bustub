@@ -69,6 +69,11 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   auto PlaceMapping(const KeyType& key, const ValueType& value, KeyComparator comparator) -> bool;
 
   /**
+   * @brief Set Map at a specific index
+  */
+  void SetMappingAt(int index, const MappingType& map);
+
+  /**
    * @brief Use binary search to find a key that is equal to target key
    * @param key the key to be found
    * @return return -1 if the key is not in the leaf page.

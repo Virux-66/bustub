@@ -129,6 +129,14 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::PlaceMapping(const KeyType& key, const ValueTyp
 
 
 INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_LEAF_PAGE_TYPE::SetMappingAt(int index, const MappingType& map){
+  if(index >= GetMaxSize()){
+    return;
+  }
+  array_[index] = map;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::SearchKey(KeyType key, KeyComparator comparator) const -> int{
   // Leaf page shoud start with zero 0.
   int l = 0;

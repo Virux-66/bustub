@@ -170,6 +170,14 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::SearchKey(KeyType key, KeyComparator compar
   return pos;
 }
 
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetMappingAt(int index, const MappingType& map){
+  if(index >= GetMaxSize()){
+    return;
+  }
+  array_[index] = map;
+}
+
 // valuetype for internalNode should be page id_t
 template class BPlusTreeInternalPage<GenericKey<4>, page_id_t, GenericComparator<4>>;
 template class BPlusTreeInternalPage<GenericKey<8>, page_id_t, GenericComparator<8>>;

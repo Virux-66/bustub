@@ -90,6 +90,11 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    */
   auto PlaceMapping(const KeyType& key, const ValueType& value, KeyComparator comparator) -> bool;
 
+ /**
+   * @brief Set Map at a specific index
+  */
+  void SetMappingAt(int index, const MappingType& map) ;
+
   /**
    * @brief Use binary search to find a minimum key that
    *        is greater than or equal to the target key.

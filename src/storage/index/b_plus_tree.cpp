@@ -383,39 +383,165 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
       // Check if the deletion is the last node.
       if(leaf_page_data->GetSize() == 0){
         header_page_data->root_page_id_ = INVALID_PAGE_ID;
+        header_page.SetDirty();
       }
     }else{
+      // Handle edge case, the page is leaf page.
       BasicPageGuard tracked_internal_page(std::move(ctx.basic_set_.back()));
       ctx.basic_set_.pop_back();
       auto* tracked_internal_data = tracked_internal_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
+      int key_idx = tracked_internal_data->SearchKey(key, comparator_) - 1;
 
       // Check if borrow from sibling.
-      BPlusTreeLeafPage<keyType, ValueType, KeyComparator>* left_data = nullptr;
-      BPlusTreeLeafPage<keyType, ValueType, KeyComparator>* right_data = nullptr;
-      int key_idx = tracked_internal_data->SearchKey(key, comparator_) - 1;
+      BasicPageGuard left_page;
+      BasicPageGuard right_page;
+      LeafPage* left_data = nullptr;
+      LeafPage* right_data = nullptr;
       if(key_idx - 1 >= 0){
         page_id_t left_sibling_page_id = tracked_internal_data->ValueAt(key_idx - 1);
-        BasicPageGuard page_guard = bpm_->FetchPageBasic(left_sibling_page_id);
-        left_data = page_guard.AsMut<LeafPage>();
+        left_page = bpm_->FetchPageBasic(left_sibling_page_id);
+        left_data = left_page.AsMut<LeafPage>();
       } 
-      if(key_idx + 1 <= internal_max_size_-1){
+      if(key_idx + 1 <= internal_max_size_ - 1){
         page_id_t right_sibling_page_id = tracked_internal_data->ValueAt(key_idx + 1);
-        BasicPageGuard page_guard = bpm_->FetchPageBasic(right_sibling_page_id);
-        right_data = page_guard.AsMut<LeafPage>();
+        right_page = bpm_->FetchPageBasic(right_sibling_page_id);
+        right_data = right_page.AsMut<LeafPage>();
       }
+
+      bool borrowed = false;
       if(left_data != nullptr || right_data != nullptr){
         // Probably can borrow from sibling page.
         // check if leaf sibling can be borrowed?
-        if(left_data->GetSize() > leaf_max_size_/2){
+        if(left_data != nullptr && left_data->GetSize() > leaf_max_size_/2){
           // borrow from left sibling
           // TODO
-        }else if(right_data->GetSize() > leaf_max_size_/2){
+          int size = left_data->GetSize();
+          MappingType orphan = MappingType(left_data->KeyAt(size - 1), left_data->ValueAt(size - 1));
+          leaf_page_data->PlaceMapping(orphan.first, orphan.second, comparator_);
+          left_data->IncreaseSize(-1);
+          tracked_internal_data->SetKeyAt(key_idx, orphan.first);
+
+          // Set three pages dirty
+          left_page.SetDirty();
+          tracked_internal_page.SetDirty();
+          probe_page.SetDirty();
+
+          borrowed = true;
+        }
+
+        // 
+        if(!borrowed && right_data != nullptr && right_data->GetSize() > leaf_max_size_/2){
           // borrow from right sibling   
           // TODO
+          int size = right_data->GetSize();
+          MappingType orphan = MappingType(right_data->KeyAt(0), right_data->ValueAt(0));
+          leaf_page_data->PlaceMapping(orphan.first, orphan.second, comparator_);
+          for(int i = 0; i < size - 1; i++){
+            MappingType map = MappingType(right_data->KeyAt(i + 1), right_data->ValueAt(i + 1));
+            right_data->SetMappingAt(i, map);
+          }
+          right_data->IncreaseSize(-1);
+          tracked_internal_data->SetKeyAt(key_idx, right_data->KeyAt(0));
+
+          // Set three page dirty
+          right_page.SetDirty();
+          tracked_internal_page.SetDirty();
+          probe_page.SetDirty();
+
+          borrowed = true;
         }
-      }else{
-        // Abosolutly can't borrow from sibling page.
-        // TODO
+      }
+
+      if(!borrowed){
+        // Abosolutly can't borrow from sibling page. Two page should be merged.
+        // Two cases: merge the leaf page with its left sibling
+        //            merge the leaf page with its right sibling
+        // Here, some issues we can concern about.
+        // If the tree has more deletion than insertion, we should merge leaf page
+        // with the one that has bigger size, and vice verse.
+        //bool merged = false;
+        if(left_data->GetSize() <= right_data->GetSize()){
+          // Left sibling has bigger size. Merge it.
+          const int key_index = tracked_internal_data->SearchKey(key, comparator_) - 1;
+          int leaf_size = leaf_page_data->GetSize();
+          int left_size = left_data->GetSize();
+
+          for(int i = 0; i < leaf_size; i++){
+            MappingType map(leaf_page_data->KeyAt(i), leaf_page_data->ValueAt(i));
+            left_data->SetMappingAt(i + left_size, map);
+          }
+          for(int i = key_index; i < tracked_internal_data->GetSize() - 1; i++){
+            std::pair<KeyType, page_id_t> map(tracked_internal_data->KeyAt(i + 1), tracked_internal_data->ValueAt(i + 1));
+            tracked_internal_data->SetMappingAt(i, map);
+          }
+
+          left_data->IncreaseSize(leaf_size);
+          left_page.SetDirty();
+          leaf_page_data->IncreaseSize(-leaf_size);
+          probe_page.SetDirty();
+          tracked_internal_data->IncreaseSize(-1);
+          tracked_internal_page.SetDirty();
+        }else{
+          // Right sibling has bigger size. Merge it.
+          const int key_index = tracked_internal_data->SearchKey(key, comparator_) - 1;
+          int leaf_size = leaf_page_data->GetSize();
+          int right_size = right_data->GetSize();
+          for(int i = 0; i < right_size; i++){
+            MappingType map(right_data->KeyAt(i), right_data->ValueAt(i));
+            leaf_page_data->SetMappingAt(i + leaf_size, map);
+          }
+
+          for(int i = key_index + 1; i < tracked_internal_data->GetSize() - 1; i++){
+            std::pair<KeyType, page_id_t> map(tracked_internal_data->KeyAt(i + 1), tracked_internal_data->ValueAt(i + 1));
+            tracked_internal_data->SetMappingAt(i, map);
+          }
+
+          leaf_page_data->IncreaseSize(right_size);
+          probe_page.SetDirty();
+          right_data->IncreaseSize(-right_size);
+          right_page.SetDirty();
+          tracked_internal_data->IncreaseSize(-1);
+          tracked_internal_page.SetDirty();
+        }
+
+        // Recursively merge along the tree. This is the last step.
+        BasicPageGuard probe_page = std::move(tracked_internal_page);
+        auto* probe_data = tracked_internal_data;
+        while(!ctx.basic_set_.empty() && probe_data->GetSize() < internal_max_size_/2){
+          BasicPageGuard parent_page = std::move(ctx.basic_set_.back());
+          ctx.basic_set_.pop_back();
+          auto* parent_data = parent_page.AsMut<InternalPage>();
+          const int key_index = parent_data->SearchKey(key, comparator_) - 1;
+          BasicPageGuard left_page;
+          BasicPageGuard right_page;
+          InternalPage* left_data = nullptr;
+          InternalPage* right_data = nullptr;
+          if(key_index - 1 >= 0){
+            page_id_t left_sibling_page_id = parent_data->ValueAt(key_index - 1);
+            left_page = bpm_->FetchPageBasic(left_sibling_page_id);
+            left_data = left_page.AsMut<InternalPage>();
+          }
+
+          if(key_index + 1 <= internal_max_size_ - 1){
+            page_id_t right_sibling_page_id = parent_data->ValueAt(key_index + 1);
+            right_page = bpm_->FetchPageBasic(right_sibling_page_id);
+            right_data = right_page.AsMut<InternalPage>();
+          }
+
+          // try borrow from sibling,
+          // if can't merge two internal page and then update probe_page and probe_data.
+
+
+
+
+
+
+
+
+
+
+
+        }
       }
 
     }
