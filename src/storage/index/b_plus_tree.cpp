@@ -531,16 +531,48 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
           // try borrow from sibling,
           // if can't merge two internal page and then update probe_page and probe_data.
 
+          bool internal_borrowed = false;
+          if(left_data != nullptr || right_data != nullptr){
+            if(left_data != nullptr && left_data->GetSize() > internal_max_size_ / 2){
+              int size = left_data->GetSize();
+              std::pair<KeyType, page_id_t> orphan(left_data->KeyAt(size - 1), left_data->ValueAt(size - 1));
+              probe_data->PlaceMapping(parent_data->KeyAt(key_index), INVALID_PAGE_ID, comparator_);
+              probe_data->SetValueAt(0, orphan.second);
+              parent_data->SetKeyAt(key_index, orphan.first);
+              left_data->IncreaseSize(-1);
 
+              left_page.SetDirty();
+              parent_page.SetDirty();
+              probe_page.SetDirty();
 
+              internal_borrowed = true;
+            }
 
+            if(!internal_borrowed && right_data != nullptr && right_data->GetSize() > internal_max_size_ / 2){
+              int size = right_data->GetSize();
+              // Notice this special orphan's value.
+              std::pair<KeyType, page_id_t> orphan(right_data->KeyAt(1), right_data->ValueAt(0));
+              probe_data->PlaceMapping(parent_data->KeyAt(key_index + 1), INVALID_PAGE_ID, comparator_);
+              probe_data->SetValueAt(probe_data->GetSize() - 1, orphan.second);
+              parent_data->SetKeyAt(key_index + 1, orphan.first);
+              right_data->SetValueAt(0, right_data->ValueAt(1));
+              for(int i = 1; i < size - 1; i++){
+                std::pair<KeyType, page_id_t> map(right_data->KeyAt(i + 1), right_data->ValueAt(i + 1));
+                right_data->SetMappingAt(i, map);
+              }
+              right_data->IncreaseSize(-1);
+            
+              probe_page.SetDirty();
+              parent_page.SetDirty();
+              right_page.SetDirty();
+            
+              internal_borrowed = true;
+            }
+          
 
-
-
-
-
-
-
+          }
+          probe_page = std::move(parent_page);
+          probe_data = parent_data;
         }
       }
 
