@@ -18,6 +18,12 @@ BasicPageGuard::BasicPageGuard(BasicPageGuard &&that) noexcept {
 
 void BasicPageGuard::Drop() {
     /** Actually, I don't pretty understand what Drop means*/
+
+    if(bpm_ == nullptr && page_ == nullptr){
+        return;
+    }
+    BUSTUB_ASSERT(page_ && bpm_ , "Either bpm_ or page_ is nullptr, which is very strange." );
+
     bpm_->UnpinPage(page_->GetPageId(),  page_->IsDirty());
     bpm_ = nullptr;
     page_ = nullptr;
@@ -39,9 +45,13 @@ auto BasicPageGuard::operator=(BasicPageGuard &&that) noexcept -> BasicPageGuard
 }
 
 BasicPageGuard::~BasicPageGuard(){
-    if(bpm_ && page_){
-        Drop();
+
+
+    if(page_ == nullptr && bpm_ == nullptr){
+        return;
     }
+    BUSTUB_ASSERT(page_ && bpm_ , "Either bpm_ or page_ is nullptr, which is very strange." );
+    Drop();
 };  // NOLINT
 
 ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept{
@@ -65,6 +75,13 @@ void ReadPageGuard::Drop() {
 }
 
 ReadPageGuard::~ReadPageGuard() {
+
+    // Check if this object is moved
+    if(guard_.page_ == nullptr && guard_.bpm_ == nullptr){
+        return;
+    }
+    BUSTUB_ASSERT(guard_.page_ && guard_.bpm_ , "Either bpm_ or page_ is nullptr, which is very strange." );
+
     Drop();
 }  // NOLINT
 
@@ -89,6 +106,12 @@ void WritePageGuard::Drop() {
 }
 
 WritePageGuard::~WritePageGuard() {
+
+    // Check if this object is moved
+    if(guard_.page_ == nullptr && guard_.bpm_ == nullptr){
+        return;
+    }
+    BUSTUB_ASSERT(guard_.page_ && guard_.bpm_ , "Either bpm_ or page_ is nullptr, which is very strange." );
     Drop();
 }  // NOLINT
 
