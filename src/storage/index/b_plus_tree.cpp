@@ -36,10 +36,10 @@ auto BPLUSTREE_TYPE::IsEmpty() const -> bool {
    * to BPlusTreePage to get its size_ member.
   */ 
   //auto root_page_id = GetRootPageId();
-  BasicPageGuard header_page = bpm_->FetchPageBasic(header_page_id_);
+  ReadPageGuard header_page = bpm_->FetchPageRead(header_page_id_);
   auto* header_page_data = header_page.As<BPlusTreeHeaderPage>();
   auto root_page_id = header_page_data->root_page_id_;
-  BasicPageGuard root_page = bpm_->FetchPageBasic(root_page_id);
+  ReadPageGuard root_page = bpm_->FetchPageRead(root_page_id);
   auto* root_page_data = root_page.As<BPlusTreePage>();
   return (root_page_data->GetSize() == 0);
 }
@@ -63,10 +63,12 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   Context ctx;
   (void)ctx;
   auto probe_page_id = GetRootPageId();
+  ReadPageGuard parent_page = bpm_->FetchPageRead(header_page_id_);
   bool found = false;
   while(true){
 	  // ReadPageGuard probe_page = bpm_->FetchPageRead(probe_page_id);
-    BasicPageGuard probe_page = bpm_->FetchPageBasic(probe_page_id);
+    ReadPageGuard probe_page = bpm_->FetchPageRead(probe_page_id);
+    parent_page.Drop();
   	const auto* probe_page_data = probe_page.As<BPlusTreePage>();
 
     if(probe_page_data->IsLeafPage()){
@@ -85,6 +87,7 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
      * we should get its left pointer.
      */
     probe_page_id = internal_data->ValueAt(index - 1);
+    parent_page = std::move(probe_page);
   }
 
   return found;
@@ -106,14 +109,15 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   Context ctx;
   (void)ctx;
 
-  BasicPageGuard header_page = bpm_->FetchPageBasic(header_page_id_);
+  WritePageGuard header_page = bpm_->FetchPageWrite(header_page_id_);
   auto* header_page_data = header_page.AsMut<BPlusTreeHeaderPage>();
+  ctx.root_page_id_ = header_page_data->root_page_id_;
   // Root page is invalided, which indicates the B+ tree is empty.
   if(header_page_data->root_page_id_ == INVALID_PAGE_ID){
     // If B+ tree is empty, we need allocate a new page for root.
     page_id_t new_page_id;
     bpm_->NewPageGuarded(&new_page_id);
-    BasicPageGuard new_page = bpm_->FetchPageBasic(new_page_id);
+    WritePageGuard new_page = bpm_->FetchPageWrite(new_page_id);
     // The root page will be Leaf page.
     auto* new_page_data = new_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
 
@@ -124,50 +128,86 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     new_page.SetDirty();
     // update root page id
     header_page_data->root_page_id_ = new_page_id;
-
+    header_page.SetDirty();
     return true;
   }
 
+  /** Make header_page into write_set_. Because in the next while loop
+   * if a internal page or leaf page is less than max size, all pages
+   * in write_set_ will be popped, while after the next loop completes,
+   * the header_page stationing write_set_ indicates the insertion will
+   * cause splition where the header_page guard should be catched.
+  */
+  ctx.write_set_.push_back(std::move(header_page));
+
   // There are at least one node.
   page_id_t probe_page_id = header_page_data->root_page_id_;
-  BasicPageGuard probe_page = bpm_->FetchPageBasic(probe_page_id);
+  WritePageGuard probe_page = bpm_->FetchPageWrite(probe_page_id);
   auto* probe_page_data = probe_page.AsMut<BPlusTreePage>();
 
   // Another implementation.
   while(true){
     if(probe_page_data->IsLeafPage()){
+      if(probe_page_data->GetSize() < leaf_max_size_){
+        while(!ctx.write_set_.empty()){
+          ctx.write_set_.pop_front();
+        }
+      }
+      /** Even the leaf page is less than max size, we should acquire its write lock*/
+      ctx.write_set_.push_back(std::move(probe_page));
       break;
     }
     auto* probe_internal_page = probe_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
     int index = probe_internal_page->SearchKey(key, comparator_);
 
+    /** If this page is less than max size, we only can release all previous write locks except current page
+     * This is because we can't tell whether the child page of this page will split.
+    */
+    if(probe_internal_page->GetSize() < internal_max_size_ ){
+      while(!ctx.write_set_.empty()){
+        ctx.write_set_.pop_front();
+      }
+    }
     // Track the accessed pages
-    ctx.basic_set_.push_back(std::move(probe_page));
+    ctx.write_set_.push_back(std::move(probe_page));
+    
 
     // The return value is the minimum greater than the target key.
     probe_page_id = probe_internal_page->ValueAt(index - 1);
-    probe_page = bpm_->FetchPageBasic(probe_page_id);
+    probe_page = bpm_->FetchPageWrite(probe_page_id);
     probe_page_data = probe_page.AsMut<BPlusTreePage>();
   }
 
-  // After breaking, the probe_page_data is actually a BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>
-
+  /**
+   * After breaking, the probe_page_data is actually a BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>
+   * Because the probe_page has been pushed into ctx.write_set_, we should get it from write_set_.
+   */
+  probe_page = std::move(ctx.write_set_.back());
+  ctx.write_set_.pop_back();
   auto* leaf_page_data = probe_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
   if(leaf_page_data->GetSize() < leaf_max_size_){
-    // The leaf page need not split, so just insert
+    /** The leaf page need not split, so just insert.
+     *  In this case, the ctx.write_set has already been empty.
+    */
     leaf_page_data->PlaceMapping(key, value, comparator_);
     probe_page.SetDirty();
 
-    while(!ctx.basic_set_.empty()){
-      ctx.basic_set_.pop_back();
+    // But it's ok to try popping.
+    while(!ctx.write_set_.empty()){
+      ctx.write_set_.pop_back();
     }
+    std::cout <<"thread id: " <<std::this_thread::get_id() << "\t Insert key:"<< key.ToString() <<std::endl;
+    for(int i = 0; i < leaf_page_data->GetSize(); i++){
+      std::cout << leaf_page_data->KeyAt(i) << "\t" <<leaf_page_data->ValueAt(i);
+    }
+    std::cout << std::endl;
   }else if(probe_page_id == header_page_data->root_page_id_){
     // Edge case: There is only node, which is root node and need split.
 
     // Step 1. Request a new page.
     page_id_t root_sibling_id;
     bpm_->NewPageGuarded(&root_sibling_id);
-    BasicPageGuard root_sibling_page = bpm_->FetchPageBasic(root_sibling_id);
+    WritePageGuard root_sibling_page = bpm_->FetchPageWrite(root_sibling_id);
     auto* root_sibling_data = root_sibling_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
 
     // Step 2. Split the overflow page.
@@ -200,20 +240,23 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
 
     page_id_t new_root_id;
     bpm_->NewPageGuarded(&new_root_id);
-    BasicPageGuard root_page = bpm_->FetchPageBasic(new_root_id);
+    WritePageGuard root_page = bpm_->FetchPageWrite(new_root_id);
     auto* root_data = root_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
     root_data->PlaceHead(header_page_data->root_page_id_);
     root_data->PlaceMapping(new_internal_node.first, new_internal_node.second, comparator_);
-    header_page_data->root_page_id_ = new_root_id;
     root_page.SetDirty();
 
+    header_page = std::move(ctx.write_set_.back());
+    header_page_data = header_page.AsMut<BPlusTreeHeaderPage>();
+    header_page_data->root_page_id_ = new_root_id;
+    header_page.SetDirty();
   }else{
     // The leaf page would split. Handle carefully.
 
     // Step 1. Request a new page
     page_id_t new_page_id;
     bpm_->NewPageGuarded(&new_page_id);
-    BasicPageGuard new_page = bpm_->FetchPageBasic(new_page_id);
+    WritePageGuard new_page = bpm_->FetchPageWrite(new_page_id);
     auto* new_page_data = new_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
 
     // Step 2. Split the overflow page. 
@@ -244,20 +287,26 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     // Step 5. Update internal pages recurively with leaf_page_data and new_page_data
     // The division point is leaf_page_data[GetSize() - 1];
     auto new_internal_node = std::make_pair(new_page_data->KeyAt(0), new_page_id);
-    bool root_splited = true;
+    bool root_splited = false;
     std::pair<KeyType, page_id_t> root_sibling;
-    while(!ctx.basic_set_.empty()){
-      BasicPageGuard tracked_internal_page(std::move(ctx.basic_set_.back()));
-      ctx.basic_set_.pop_back();
+    while(!ctx.write_set_.empty() && !root_splited){
+      /** Carefully, the writePageGuard got from write_set might not be internal page.
+       * It probably is header_page.
+      */
+      WritePageGuard tracked_internal_page(std::move(ctx.write_set_.back()));
+      ctx.write_set_.pop_back();
       auto* tracked_internal_data = tracked_internal_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
+      if(tracked_internal_page.PageId() == ctx.root_page_id_ && !ctx.write_set_.empty()){
+        root_splited = true;
+      }
 
       if(tracked_internal_data->GetSize() < internal_max_size_){
         root_splited = false;
         tracked_internal_data->PlaceMapping(new_internal_node.first, new_internal_node.second, comparator_);
         tracked_internal_page.SetDirty();
-        // release all BasicPageGuard
-        while(!ctx.basic_set_.empty()){
-          ctx.basic_set_.pop_back();
+        // release all WritePageGuard
+        while(!ctx.write_set_.empty()){
+          ctx.write_set_.pop_back();
         }
         break;
       }else{
@@ -265,7 +314,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
         // Step 1. Request a new page.
         page_id_t new_page_id;
         bpm_->NewPageGuarded(&new_page_id);
-        BasicPageGuard new_page = bpm_->FetchPageBasic(new_page_id);
+        WritePageGuard new_page = bpm_->FetchPageWrite(new_page_id);
         auto* new_page_data = new_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
 
         // Step 2. Split the overflow page.
@@ -313,16 +362,20 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     // The last step. Check whether the root is splited.
     // After basic_set_ is empty, it's possible that the root also need split.
     if(root_splited){
+      header_page = std::move(ctx.write_set_.back());
+      ctx.write_set_.pop_back();
+      header_page_data = header_page.AsMut<BPlusTreeHeaderPage>();
       page_id_t new_root_id;
       page_id_t old_root_id = header_page_data->root_page_id_;
       bpm_->NewPageGuarded(&new_root_id);
-      BasicPageGuard new_root_page = bpm_->FetchPageBasic(new_root_id);
+      WritePageGuard new_root_page = bpm_->FetchPageWrite(new_root_id);
       auto* new_root_data = new_root_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
       new_root_data->PlaceHead(old_root_id);
       new_root_data->PlaceMapping(root_sibling.first, root_sibling.second, comparator_); 
       new_root_page.SetDirty();
       // Update header page to new root page id.
       header_page_data->root_page_id_ = new_root_id;
+      header_page.SetDirty(); 
     }
   }
   return true;
