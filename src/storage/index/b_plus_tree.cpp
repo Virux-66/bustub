@@ -196,11 +196,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     while(!ctx.write_set_.empty()){
       ctx.write_set_.pop_back();
     }
-    std::cout <<"thread id: " <<std::this_thread::get_id() << "\t Insert key:"<< key.ToString() <<std::endl;
-    for(int i = 0; i < leaf_page_data->GetSize(); i++){
-      std::cout << leaf_page_data->KeyAt(i) << "\t" <<leaf_page_data->ValueAt(i);
-    }
-    std::cout << std::endl;
+
   }else if(probe_page_id == header_page_data->root_page_id_){
     // Edge case: There is only node, which is root node and need split.
 

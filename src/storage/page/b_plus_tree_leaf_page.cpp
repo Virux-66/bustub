@@ -95,6 +95,7 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::PlaceMapping(const KeyType& key, const ValueTyp
   int l = 0;
   int r = GetSize() - 1;
   int pos = 0;
+  bool equal = false;
 
   // The leaf page has been full.
   if(GetSize() == GetMaxSize()){
@@ -105,6 +106,7 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::PlaceMapping(const KeyType& key, const ValueTyp
     int mid = (l + r)/2;
     if(comparator(array_[mid].first, key) == 0){
       pos = mid;
+      equal = true;
       break;
     }
     if(comparator(array_[mid].first, key) == -1){
@@ -116,6 +118,10 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::PlaceMapping(const KeyType& key, const ValueTyp
       }
       r = mid - 1;
     }
+  }
+  // If there have been a key with the same value, don't insert.
+  if(equal){
+    return false;
   }
 
   for(int i = GetSize() - 1; i >= pos; i--){

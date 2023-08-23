@@ -141,7 +141,6 @@ TEST(BPlusTreeConcurrentTest, InsertTest1) {
     keys.push_back(key);
   }
   LaunchParallelTest(2, InsertHelper, &tree, keys);
-  std::cout << tree.DrawBPlusTree() << std::endl;
   std::vector<RID> rids;
   GenericKey<8> index_key;
   for (auto key : keys) {
@@ -170,7 +169,7 @@ TEST(BPlusTreeConcurrentTest, InsertTest1) {
   delete bpm;
 }
 
-TEST(BPlusTreeConcurrentTest, DISABLED_InsertTest2) {
+TEST(BPlusTreeConcurrentTest, InsertTest2) {
   // create KeyComparator and index schema
   auto key_schema = ParseCreateStatement("a bigint");
   GenericComparator<8> comparator(key_schema.get());
