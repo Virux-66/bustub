@@ -103,18 +103,17 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::PlaceMapping(const KeyType& key, const ValueTyp
 
   while(l <= r){
     int mid = (l + r)/2;
-    if( l == r ){
-      if(comparator(array_[l].first, key) == -1){
-        pos = l + 1;
-      }else{
-        pos = l;
-      }
+    if(comparator(array_[mid].first, key) == 0){
+      pos = mid;
       break;
     }
-
     if(comparator(array_[mid].first, key) == -1){
+      pos = mid + 1;
       l = mid + 1;
     }else{
+      if(mid < pos){
+        pos = mid;
+      }
       r = mid - 1;
     }
   }
