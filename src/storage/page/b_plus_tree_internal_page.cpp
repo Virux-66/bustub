@@ -141,8 +141,24 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::SearchKey(KeyType key, KeyComparator compar
   // Internal page should start with 1.
   int l = 1;
   int r = GetSize() - 1;
-  int pos = 1;
+  //int pos = 1;
+  int pos = GetSize();
 
+  while(l <= r){
+    int mid = (l + r)/2;
+    if(comparator(array_[mid].first, key) == 0){
+      pos = mid + 1;
+      break;
+    }
+    if(comparator(array_[mid].first, key) < 0){
+      l = mid + 1;
+    }else{
+      pos = std::min(pos, mid);
+      r = mid - 1;
+    }
+  }
+  return pos;
+  /*
   while(l <= r){
     int mid = (l + r)/2;
     if(l == r){
@@ -154,13 +170,6 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::SearchKey(KeyType key, KeyComparator compar
       }
       break;
     }
-    /*
-    if(comparator(array_[mid].first, key) == -1){
-      l = mid + 1;
-    }else{
-      r = mid - 1;
-    }
-    */
    if(comparator(array_[mid].first,key) == 1){
     r = mid - 1;
    }else{
@@ -168,6 +177,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::SearchKey(KeyType key, KeyComparator compar
    }
   }
   return pos;
+  */
 }
 
 INDEX_TEMPLATE_ARGUMENTS
