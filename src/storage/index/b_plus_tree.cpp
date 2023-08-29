@@ -81,6 +81,10 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
 			break;
     }
     const auto* internal_data = probe_page.As<InternalPage>(); 
+    // Temporary
+    if(internal_data->GetSize() == 0){
+      return false;
+    }
 		int index = internal_data->SearchKey(key, comparator_);		
     /**
      * Since SearchKey finds a minimum key that is greater than the target key
@@ -120,6 +124,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     WritePageGuard new_page = bpm_->FetchPageWrite(new_page_id);
     // The root page will be Leaf page.
     auto* new_page_data = new_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
+    new_page_data->SetMaxSize(leaf_max_size_);
 
     new_page_data->Init();
 
@@ -158,6 +163,10 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       break;
     }
     auto* probe_internal_page = probe_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
+    // temporary
+    if(probe_internal_page->GetSize() == 0){
+      return false; 
+    }
     int index = probe_internal_page->SearchKey(key, comparator_);
 
     /** If this page is less than max size, we only can release all previous write locks except current page
@@ -205,6 +214,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     bpm_->NewPageGuarded(&root_sibling_id);
     WritePageGuard root_sibling_page = bpm_->FetchPageWrite(root_sibling_id);
     auto* root_sibling_data = root_sibling_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
+    root_sibling_data->SetMaxSize(leaf_max_size_);
 
     // Step 2. Split the overflow page.
     int divide_index = (leaf_max_size_ - 1)/2;
@@ -238,6 +248,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     bpm_->NewPageGuarded(&new_root_id);
     WritePageGuard root_page = bpm_->FetchPageWrite(new_root_id);
     auto* root_data = root_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
+    root_data->SetMaxSize(internal_max_size_);
     root_data->PlaceHead(header_page_data->root_page_id_);
     root_data->PlaceMapping(new_internal_node.first, new_internal_node.second, comparator_);
     root_page.SetDirty();
@@ -254,7 +265,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     bpm_->NewPageGuarded(&new_page_id);
     WritePageGuard new_page = bpm_->FetchPageWrite(new_page_id);
     auto* new_page_data = new_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
-
+    new_page_data->SetMaxSize(leaf_max_size_);
     // Step 2. Split the overflow page. 
     // [0,divide_index] stay still, while [divide_point + 1, GetMaxSize-1] are put new leaf page.
     // Due to this division method, left page will be at least equal to the right page.
@@ -312,7 +323,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
         bpm_->NewPageGuarded(&new_page_id);
         WritePageGuard new_page = bpm_->FetchPageWrite(new_page_id);
         auto* new_page_data = new_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
-
+        new_page_data->SetMaxSize(internal_max_size_);
         // Step 2. Split the overflow page.
         //int divide_index = tracked_internal_data->GetMaxSize()/2;
         int divide_index = internal_max_size_/2;
@@ -366,6 +377,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       bpm_->NewPageGuarded(&new_root_id);
       WritePageGuard new_root_page = bpm_->FetchPageWrite(new_root_id);
       auto* new_root_data = new_root_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
+      new_root_data->SetMaxSize(internal_max_size_);
       new_root_data->PlaceHead(old_root_id);
       new_root_data->PlaceMapping(root_sibling.first, root_sibling.second, comparator_); 
       new_root_page.SetDirty();
@@ -392,34 +404,59 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
   // Declaration of context instance.
   Context ctx;
   (void)ctx;
-  BasicPageGuard header_page = bpm_->FetchPageBasic(header_page_id_);
+  WritePageGuard header_page = bpm_->FetchPageWrite(header_page_id_);
   auto* header_page_data = header_page.AsMut<BPlusTreeHeaderPage>();
   if(header_page_data->root_page_id_ == INVALID_PAGE_ID){
     // The tree is empty, return immediately.
     return;
   }
+  ctx.root_page_id_ = header_page_data->root_page_id_;
+
+  ctx.write_set_.push_back(std::move(header_page));
 
   // Find the key along the tree
   page_id_t probe_page_id = header_page_data->root_page_id_;
-  BasicPageGuard probe_page = bpm_->FetchPageBasic(probe_page_id);
+  WritePageGuard probe_page = bpm_->FetchPageWrite(probe_page_id);
   auto* probe_page_data = probe_page.AsMut<BPlusTreePage>();
   while(true){
     if(probe_page_data->IsLeafPage()){
+      if(probe_page_data->GetSize() > leaf_max_size_/2){
+        while(!ctx.write_set_.empty()){
+          ctx.write_set_.pop_front();
+        }
+      }
+      ctx.write_set_.push_back(std::move(probe_page));
       break;
     }
     auto* probe_internal_page = probe_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
     int index = probe_internal_page->SearchKey(key, comparator_);
 
     // Track the accessed pages
-    ctx.basic_set_.push_back(std::move(probe_page));
+    ctx.write_set_.push_back(std::move(probe_page));
 
     probe_page_id = probe_internal_page->ValueAt(index - 1);
-    probe_page = bpm_->FetchPageBasic(probe_page_id);
+    probe_page = bpm_->FetchPageWrite(probe_page_id);
     probe_page_data = probe_page.AsMut<BPlusTreePage>();
   }
 
+  probe_page = std::move(ctx.write_set_.back());
+  ctx.write_set_.pop_back();
+
   auto* leaf_page_data = probe_page.AsMut<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>>();
+  if(leaf_page_data->GetSize() == 0){
+    return;
+  }
   int del_index = leaf_page_data->SearchKey(key, comparator_);
+  if(del_index == -1){
+    // If the key has been deleted, del_index will be -1. Return immediately.
+    return;
+  }
+  if(comparator_(leaf_page_data->KeyAt(del_index),key) != 0){
+    while(!ctx.write_set_.empty()){
+      ctx.write_set_.pop_front();
+    }
+    return;
+  }
   leaf_page_data->Remove(del_index);
   probe_page.SetDirty();
 
@@ -429,29 +466,32 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
     if(probe_page_id == header_page_data->root_page_id_){
       // Check if the deletion is the last node.
       if(leaf_page_data->GetSize() == 0){
+        // reacquire the write lock of header page.
+        header_page = std::move(ctx.write_set_.back());
+        ctx.write_set_.pop_back();
         header_page_data->root_page_id_ = INVALID_PAGE_ID;
         header_page.SetDirty();
       }
     }else{
       // Handle edge case, the page is leaf page.
-      BasicPageGuard tracked_internal_page(std::move(ctx.basic_set_.back()));
-      ctx.basic_set_.pop_back();
+      WritePageGuard tracked_internal_page(std::move(ctx.write_set_.back()));
+      ctx.write_set_.pop_back();
       auto* tracked_internal_data = tracked_internal_page.AsMut<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>();
       int key_idx = tracked_internal_data->SearchKey(key, comparator_) - 1;
 
       // Check if borrow from sibling.
-      BasicPageGuard left_page;
-      BasicPageGuard right_page;
+      WritePageGuard left_page;
+      WritePageGuard right_page;
       LeafPage* left_data = nullptr;
       LeafPage* right_data = nullptr;
       if(key_idx - 1 >= 0){
         page_id_t left_sibling_page_id = tracked_internal_data->ValueAt(key_idx - 1);
-        left_page = bpm_->FetchPageBasic(left_sibling_page_id);
+        left_page = bpm_->FetchPageWrite(left_sibling_page_id);
         left_data = left_page.AsMut<LeafPage>();
       } 
       if(key_idx + 1 <= internal_max_size_ - 1){
         page_id_t right_sibling_page_id = tracked_internal_data->ValueAt(key_idx + 1);
-        right_page = bpm_->FetchPageBasic(right_sibling_page_id);
+        right_page = bpm_->FetchPageWrite(right_sibling_page_id);
         right_data = right_page.AsMut<LeafPage>();
       }
 
@@ -474,6 +514,11 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
           probe_page.SetDirty();
 
           borrowed = true;
+
+          // borrow success, pop all write locks
+          while(!ctx.write_set_.empty()){
+            ctx.write_set_.pop_front();
+          }
         }
 
         // 
@@ -488,7 +533,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
             right_data->SetMappingAt(i, map);
           }
           right_data->IncreaseSize(-1);
-          tracked_internal_data->SetKeyAt(key_idx, right_data->KeyAt(0));
+          tracked_internal_data->SetKeyAt(key_idx + 1, right_data->KeyAt(0));
 
           // Set three page dirty
           right_page.SetDirty();
@@ -496,6 +541,11 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
           probe_page.SetDirty();
 
           borrowed = true;
+
+          // borrow success, pop all write locks
+          while(!ctx.write_set_.empty()){
+            ctx.write_set_.pop_front();
+          }
         }
       }
 
@@ -505,9 +555,9 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
         //            merge the leaf page with its right sibling
         // Here, some issues we can concern about.
         // If the tree has more deletion than insertion, we should merge leaf page
-        // with the one that has bigger size, and vice verse.
+        // with the one that has smaller size, and vice verse.
         //bool merged = false;
-        if(left_data->GetSize() <= right_data->GetSize()){
+        if( left_data != nullptr && (right_data == nullptr || left_data->GetSize() <= right_data->GetSize())){
           // Left sibling has bigger size. Merge it.
           const int key_index = tracked_internal_data->SearchKey(key, comparator_) - 1;
           int leaf_size = leaf_page_data->GetSize();
@@ -528,7 +578,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
           probe_page.SetDirty();
           tracked_internal_data->IncreaseSize(-1);
           tracked_internal_page.SetDirty();
-        }else{
+        }else if(right_data != nullptr){
           // Right sibling has bigger size. Merge it.
           const int key_index = tracked_internal_data->SearchKey(key, comparator_) - 1;
           int leaf_size = leaf_page_data->GetSize();
@@ -549,34 +599,56 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
           right_page.SetDirty();
           tracked_internal_data->IncreaseSize(-1);
           tracked_internal_page.SetDirty();
+        }else{
+          throw "Both sibling pages don't exist!";
+        }
+        // This if statement is true only if root page should be repalced with new merged pages.
+        if(tracked_internal_data->GetSize() == 1){
+          if(tracked_internal_page.PageId() != ctx.root_page_id_){
+            throw "Not root page, impossible!";
+          }
+          WritePageGuard header_page = std::move(ctx.write_set_.back());
+          ctx.write_set_.pop_back();
+          auto* header_data = header_page.AsMut<BPlusTreeHeaderPage>();
+          header_data->root_page_id_ = tracked_internal_data->ValueAt(0);
+          header_page.SetDirty();
+          return;
         }
 
+        if(tracked_internal_page.PageId() == ctx.root_page_id_){
+          while(!ctx.write_set_.empty()){
+            ctx.write_set_.pop_back();
+          }
+          return;
+        }
+
+
         // Recursively merge along the tree. This is the last step.
-        BasicPageGuard probe_page = std::move(tracked_internal_page);
+        WritePageGuard probe_page = std::move(tracked_internal_page);
         auto* probe_data = tracked_internal_data;
-        while(!ctx.basic_set_.empty() && probe_data->GetSize() < internal_max_size_/2){
-          BasicPageGuard parent_page = std::move(ctx.basic_set_.back());
-          ctx.basic_set_.pop_back();
+        while(!ctx.write_set_.empty() && probe_data->GetSize() < internal_max_size_/2){
+          WritePageGuard parent_page = std::move(ctx.write_set_.back());
+          ctx.write_set_.pop_back();
           auto* parent_data = parent_page.AsMut<InternalPage>();
           const int key_index = parent_data->SearchKey(key, comparator_) - 1;
-          BasicPageGuard left_page;
-          BasicPageGuard right_page;
+          WritePageGuard left_page;
+          WritePageGuard right_page;
           InternalPage* left_data = nullptr;
           InternalPage* right_data = nullptr;
           if(key_index - 1 >= 0){
             page_id_t left_sibling_page_id = parent_data->ValueAt(key_index - 1);
-            left_page = bpm_->FetchPageBasic(left_sibling_page_id);
+            left_page = bpm_->FetchPageWrite(left_sibling_page_id);
             left_data = left_page.AsMut<InternalPage>();
           }
 
           if(key_index + 1 <= internal_max_size_ - 1){
             page_id_t right_sibling_page_id = parent_data->ValueAt(key_index + 1);
-            right_page = bpm_->FetchPageBasic(right_sibling_page_id);
+            right_page = bpm_->FetchPageWrite(right_sibling_page_id);
             right_data = right_page.AsMut<InternalPage>();
           }
 
           // try borrow from sibling,
-          // if can't merge two internal page and then update probe_page and probe_data.
+          // if can't, merge two internal page and then update probe_page and probe_data.
 
           bool internal_borrowed = false;
           if(left_data != nullptr || right_data != nullptr){
@@ -618,8 +690,84 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
           
 
           }
+          /** todo: in this case, the internal page loses balance property and can't borrow from sibling page.
+           *  we should try merging two internal pages.
+          */
+
+          if(!internal_borrowed){
+            if(left_data != nullptr && (right_data == nullptr || left_data->GetSize() <= right_data->GetSize())){
+              // merge probe_page with left page
+              std::pair<KeyType, page_id_t> orphan(parent_data->KeyAt(key_index), probe_data->ValueAt(0));
+              int left_size = left_data->GetSize();
+              int probe_size = probe_data->GetSize();
+              left_data->SetMappingAt(left_size, orphan);
+              left_data->IncreaseSize(1); 
+              left_size += 1;
+              for(int i = 1; i < probe_size; i++){
+                std::pair<KeyType, page_id_t> map(probe_data->KeyAt(i), probe_data->ValueAt(i));
+                left_data->SetMappingAt(left_size + (i - 1), map);
+              }
+              for(int i = key_index; i < parent_data->GetSize() - 1; i++){
+                std::pair<KeyType, page_id_t> map(parent_data->KeyAt(i + 1), parent_data->ValueAt(i + 1));
+                parent_data->SetMappingAt(i, map);
+              }
+
+              left_data->IncreaseSize(probe_size - 1);
+              left_page.SetDirty();
+              probe_data->IncreaseSize(probe_size);
+              probe_page.SetDirty();
+              parent_data->IncreaseSize(-1);
+              parent_page.SetDirty();
+
+            }else if(right_data != nullptr){
+              // merge probe_page with right page
+              std::pair<KeyType, page_id_t> orphan(parent_data->KeyAt(key_index + 1), right_data->ValueAt(0));
+              int probe_size = probe_data->GetSize();
+              int right_size = right_data->GetSize();
+              probe_data->SetMappingAt(probe_size, orphan);
+              probe_data->IncreaseSize(1);
+              probe_size += 1;
+              for(int i = 1; i < right_size; i++){
+                std::pair<KeyType, page_id_t> map(right_data->KeyAt(i), right_data->ValueAt(i));
+                probe_data->SetMappingAt(probe_size + (i - 1), map);
+              }
+              for(int i = key_index + 1; i < parent_data->GetSize() - 1; i++){
+                std::pair<KeyType, page_id_t> map(parent_data->KeyAt(i + 1), parent_data->ValueAt(i + 1));
+                parent_data->SetMappingAt(i, map);
+              }
+              probe_data->IncreaseSize(right_size - 1);
+              probe_page.SetDirty();
+              right_data->IncreaseSize(right_size);
+              right_page.SetDirty();
+              parent_data->IncreaseSize(-1);
+              parent_page.SetDirty(); 
+            }else{
+              throw "Both sibling pages don't exist!";
+            }
+
+            if(parent_data->GetSize() == 1){
+              if(parent_page.PageId() != ctx.root_page_id_){
+                throw "Not root page, impossible!";
+              }
+              WritePageGuard header_page = std::move(ctx.write_set_.back());
+              ctx.write_set_.pop_back();
+              auto* header_data = header_page.AsMut<BPlusTreeHeaderPage>();
+              header_data->root_page_id_ = parent_data->ValueAt(0);
+              header_page.SetDirty();
+              return;
+            }
+          }
+
+
           probe_page = std::move(parent_page);
           probe_data = parent_data;
+
+          if(probe_page.PageId() == ctx.root_page_id_){
+            while(!ctx.write_set_.empty()){
+              ctx.write_set_.pop_back();
+            }
+            break;
+          }
         }
       }
 
