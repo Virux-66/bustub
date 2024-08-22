@@ -34,8 +34,8 @@
 #include "common/logger.h"
 #include "common/util/string_util.h"
 #include "fmt/format.h"
-#include "pg_definitions.hpp"
-#include "postgres_parser.hpp"
+#include "libpg_query/include/pg_definitions.hpp"
+#include "libpg_query/include/postgres_parser.hpp"
 #include "type/decimal_type.h"
 
 namespace bustub {
