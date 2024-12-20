@@ -17,6 +17,8 @@
 #include <mutex>  // NOLINT
 #include <unordered_map>
 #include <vector>
+#include <chrono>
+#include <limits>
 
 #include "common/config.h"
 #include "common/macros.h"
@@ -25,15 +27,34 @@ namespace bustub {
 
 enum class AccessType { Unknown = 0, Get, Scan };
 
+// The modification of LRUKNode is not protected by mutex.
+// Since it is modified within the mutex of LRUKRepalcer.
 class LRUKNode {
+ public:
+  LRUKNode() = default;
+
+  LRUKNode(size_t k, frame_id_t fid, bool is_evictable): k_(k), fid_(fid), is_evictable_(is_evictable){}
+
+  void AddRecord();
+
+  frame_id_t GetFrameId();
+
+  void SetEvictable(bool is_evictable);
+
+  bool GetEvictable() const;
+
+  size_t GetBackward(size_t k) const;
+
+  size_t GetHistorySize() const;
+
  private:
   /** History of last seen K timestamps of this page. Least recent timestamp stored in front. */
   // Remove maybe_unused if you start using them. Feel free to change the member variables as you want.
 
-  [[maybe_unused]] std::list<size_t> history_;
-  [[maybe_unused]] size_t k_;
-  [[maybe_unused]] frame_id_t fid_;
-  [[maybe_unused]] bool is_evictable_{false};
+  std::list<size_t> history_;
+  size_t k_;
+  frame_id_t fid_;
+  bool is_evictable_{false};
 };
 
 /**
@@ -146,16 +167,21 @@ class LRUKReplacer {
    * @return size_t
    */
   auto Size() -> size_t;
+ private:
+  /**
+   * thread-unsafe
+   */
+  frame_id_t SelectEvictableNode();
 
  private:
   // TODO(student): implement me! You can replace these member variables as you like.
   // Remove maybe_unused if you start using them.
-  [[maybe_unused]] std::unordered_map<frame_id_t, LRUKNode> node_store_;
+  std::unordered_map<frame_id_t, LRUKNode> node_store_;
   [[maybe_unused]] size_t current_timestamp_{0};
-  [[maybe_unused]] size_t curr_size_{0};
-  [[maybe_unused]] size_t replacer_size_;
-  [[maybe_unused]] size_t k_;
-  [[maybe_unused]] std::mutex latch_;
+  size_t curr_size_{0};
+  size_t replacer_size_;
+  size_t k_;
+  std::mutex latch_;
 };
 
 }  // namespace bustub
