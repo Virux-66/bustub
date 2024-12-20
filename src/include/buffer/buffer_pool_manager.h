@@ -190,7 +190,7 @@ class BufferPoolManager {
   std::unique_ptr<LRUKReplacer> replacer_;
   /** List of free frames that don't have any pages on them. */
   std::list<frame_id_t> free_list_;
-  /** This latch protects shared data structures. We recommend updating this comment to describe what it protects. */
+  /** This latch protects shared data structures. We recommend updating this comment to describe what it protects. It protects all member of buffer pool(big lock).*/
   std::mutex latch_;
 
   /**
