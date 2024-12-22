@@ -44,10 +44,10 @@
 #include "common/util/string_util.h"
 #include "fmt/format.h"
 #include "fmt/ranges.h"
-#include "nodes/nodes.hpp"
-#include "nodes/primnodes.hpp"
 #include "libpg_query/include/pg_definitions.hpp"
 #include "libpg_query/include/postgres_parser.hpp"
+#include "nodes/nodes.hpp"
+#include "nodes/primnodes.hpp"
 #include "type/type_id.h"
 
 namespace bustub {
