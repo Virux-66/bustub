@@ -12,7 +12,6 @@
 
 #pragma once
 
-#include <chrono>
 #include <limits>
 #include <list>
 #include <mutex>  // NOLINT
