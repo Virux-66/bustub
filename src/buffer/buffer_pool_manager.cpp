@@ -108,6 +108,9 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
     auto target_frame_id = page_table_[page_id];
     target_page = &pages_[target_frame_id];
     target_page->pin_count_ += 1;
+
+    replacer_->RecordAccess(target_frame_id);
+    replacer_->SetEvictable(target_frame_id, false);
   }else if(!free_list_.empty()){
     // (2). The requested page doesn't exist in buffer pool. Get a new page in free_list_ and place page from disk to it.
     BUSTUB_ASSERT(page_table_.find(page_id) == page_table_.end(), "The requested page must not be buffer pool!");
