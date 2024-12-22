@@ -30,7 +30,7 @@ void LRUKNode::AddRecord(){
   }
 }
 
-frame_id_t LRUKNode::GetFrameId(){
+auto LRUKNode::GetFrameId() -> frame_id_t {
   return fid_;
 }
 
@@ -38,11 +38,11 @@ void LRUKNode::SetEvictable(bool is_evictable){
   is_evictable_ = is_evictable;
 }
 
-bool LRUKNode::GetEvictable() const{
+auto LRUKNode::GetEvictable() const -> bool {
   return is_evictable_;
 }
 
-size_t LRUKNode::GetBackward(size_t k) const{
+auto LRUKNode::GetBackward(size_t k) const -> size_t {
   size_t backward_k = 0;
   if(history_.size() < k){
     backward_k = std::numeric_limits<size_t>::max();
@@ -59,7 +59,7 @@ size_t LRUKNode::GetBackward(size_t k) const{
   return backward_k;
 }
 
-size_t LRUKNode::GetHistorySize() const{
+auto LRUKNode::GetHistorySize() const -> size_t {
   return history_.size();
 }
 
@@ -129,7 +129,7 @@ auto LRUKReplacer::Size() -> size_t {
   return curr_size_;
 }
 
-frame_id_t LRUKReplacer::SelectEvictableNode(){
+auto LRUKReplacer::SelectEvictableNode() -> frame_id_t {
   frame_id_t frame_id = -1;             // the selected frame
   bool inf_node = false;                // Is there a infinite distance node in node_stone_
   size_t least_recent_time = std::numeric_limits<size_t>::max();
@@ -139,22 +139,22 @@ frame_id_t LRUKReplacer::SelectEvictableNode(){
       continue;
     }
     BUSTUB_ASSERT(itera.second.GetEvictable(), "LRUKNode should be evictable!");
-    if(itera.second.GetHistorySize() < k_ && inf_node == false){
+    if(itera.second.GetHistorySize() < k_ && !inf_node){
       frame_id = itera.first;
       least_recent_time = itera.second.GetBackward(itera.second.GetHistorySize());
       inf_node = true;
-    }else if(itera.second.GetHistorySize() < k_ && inf_node == true){
+    }else if(itera.second.GetHistorySize() < k_ && inf_node){
       if(itera.second.GetBackward(itera.second.GetHistorySize()) < least_recent_time){
         frame_id = itera.first;
         least_recent_time = itera.second.GetBackward(itera.second.GetHistorySize());
       }
       BUSTUB_ASSERT(inf_node, "A infinite LRUKNode should have already existed!");
-    }else if(itera.second.GetHistorySize() == k_ && inf_node == false){
+    }else if(itera.second.GetHistorySize() == k_ && !inf_node){
       if(itera.second.GetBackward(k_) < least_recent_time){
         frame_id = itera.first;
         least_recent_time = itera.second.GetBackward(k_);
       }
-    }else if(itera.second.GetHistorySize() == k_ && inf_node == true){
+    }else if(itera.second.GetHistorySize() == k_ && inf_node){
       BUSTUB_ASSERT(frame_id != -1, "A infinite LRUKNode should have already existed!");
       continue;
     }else{

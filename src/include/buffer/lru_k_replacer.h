@@ -18,7 +18,6 @@
 #include <unordered_map>
 #include <vector>
 #include <chrono>
-#include <limits>
 
 #include "common/config.h"
 #include "common/macros.h"
@@ -37,15 +36,15 @@ class LRUKNode {
 
   void AddRecord();
 
-  frame_id_t GetFrameId();
+  auto GetFrameId() -> frame_id_t ;
 
   void SetEvictable(bool is_evictable);
 
-  bool GetEvictable() const;
+  auto GetEvictable() const -> bool ;
 
-  size_t GetBackward(size_t k) const;
+  auto GetBackward(size_t k) const -> size_t;
 
-  size_t GetHistorySize() const;
+  auto GetHistorySize() const -> size_t;
 
  private:
   /** History of last seen K timestamps of this page. Least recent timestamp stored in front. */
@@ -171,7 +170,7 @@ class LRUKReplacer {
   /**
    * thread-unsafe
    */
-  frame_id_t SelectEvictableNode();
+  auto SelectEvictableNode() -> frame_id_t;
 
  private:
   // TODO(student): implement me! You can replace these member variables as you like.
