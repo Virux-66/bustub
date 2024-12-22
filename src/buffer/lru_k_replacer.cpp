@@ -74,8 +74,6 @@ auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
     node_store_.erase(*frame_id);
     curr_size_ -= 1;
   }
-  BUSTUB_ASSERT(curr_size_ >= 0,
-                "It's impossible that the size of LRUKReplacer is less than zero! Multiple threads might data race");
   return true;
 }
 
@@ -94,7 +92,9 @@ void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType
 
 void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
   std::lock_guard<std::mutex> lock(latch_);
-
+  if (frame_id > static_cast<int>(replacer_size_)) {
+    throw std::exception();
+  }
   BUSTUB_ASSERT(0 <= frame_id && frame_id <= static_cast<int32_t>(replacer_size_), "Invalid frame_id!");
   BUSTUB_ASSERT(node_store_.find(frame_id) != node_store_.end(), "The LRUKNode must exist!");
 
