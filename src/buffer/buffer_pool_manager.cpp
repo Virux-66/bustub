@@ -179,7 +179,7 @@ auto BufferPoolManager::UnpinPage(page_id_t page_id, bool is_dirty, [[maybe_unus
   if (page_table_.find(page_id) != page_table_.end()) {
     auto frame_id = page_table_[page_id];
     auto page = &pages_[frame_id];
-    page->is_dirty_ = is_dirty;
+    page->is_dirty_ |= is_dirty;
     if (page->GetPinCount() != 0) {
       BUSTUB_ASSERT(page->GetPinCount() > 0, "The pin_count must be greater than 0.");
       page->pin_count_ -= 1;
