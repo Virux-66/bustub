@@ -85,6 +85,7 @@ auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * {
     new_page = evicted_page;
     new_page->page_id_ = *page_id;
     new_page->pin_count_ = 1;
+    new_page->is_dirty_ = false;
 
     page_table_[*page_id] = frame_id;
     replacer_->RecordAccess(frame_id);
@@ -153,7 +154,7 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
     disk_manager_->ReadPage(page_id, target_page->data_);
     target_page->page_id_ = page_id;
     target_page->pin_count_ = 1;
-
+    target_page->is_dirty_ = false;
 
     
     page_table_[page_id] = frame_id;
