@@ -12,12 +12,12 @@
 
 #pragma once
 
+#include <chrono>
 #include <limits>
 #include <list>
 #include <mutex>  // NOLINT
 #include <unordered_map>
 #include <vector>
-#include <chrono>
 
 #include "common/config.h"
 #include "common/macros.h"
@@ -32,15 +32,15 @@ class LRUKNode {
  public:
   LRUKNode() = default;
 
-  LRUKNode(size_t k, frame_id_t fid, bool is_evictable): k_(k), fid_(fid), is_evictable_(is_evictable){}
+  LRUKNode(size_t k, frame_id_t fid, bool is_evictable) : k_(k), fid_(fid), is_evictable_(is_evictable) {}
 
   void AddRecord();
 
-  auto GetFrameId() -> frame_id_t ;
+  auto GetFrameId() -> frame_id_t;
 
   void SetEvictable(bool is_evictable);
 
-  auto GetEvictable() const -> bool ;
+  auto GetEvictable() const -> bool;
 
   auto GetBackward(size_t k) const -> size_t;
 
@@ -166,6 +166,7 @@ class LRUKReplacer {
    * @return size_t
    */
   auto Size() -> size_t;
+
  private:
   /**
    * thread-unsafe
