@@ -66,14 +66,13 @@ size_t LRUKNode::GetHistorySize() const{
 LRUKReplacer::LRUKReplacer(size_t num_frames, size_t k) : replacer_size_(num_frames), k_(k) {}
 
 auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
+  std::lock_guard<std::mutex> lock(latch_);
+
   if(curr_size_ == 0){
     // no evictable pages exist.
     return false;
   }
-  // This lock is necessary. We can't lock it just before modifying node_stone_.
-  // Because the read of node_stone_ should also be mutexed with write.
-  std::lock_guard<std::mutex> lock(latch_);
-
+ 
   *frame_id = SelectEvictableNode();
 
   BUSTUB_ASSERT(0 <= *frame_id && *frame_id <= static_cast<int32_t>(replacer_size_), "A evictable node must exist!");
@@ -88,9 +87,9 @@ auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
 }
 
 void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType access_type) {
-  BUSTUB_ASSERT(0 <= frame_id && frame_id <= static_cast<int32_t>(replacer_size_), "Invalid frame_id!");
-
   std::lock_guard<std::mutex> lock(latch_);
+
+  BUSTUB_ASSERT(0 <= frame_id && frame_id <= static_cast<int32_t>(replacer_size_), "Invalid frame_id!");
 
   if(node_store_.find(frame_id) == node_store_.end()){
     LRUKNode node(k_, frame_id, false);
@@ -101,9 +100,9 @@ void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType
 }
 
 void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
-  BUSTUB_ASSERT(0 <= frame_id && frame_id <= static_cast<int32_t>(replacer_size_), "Invalid frame_id!");
-
   std::lock_guard<std::mutex> lock(latch_);
+
+  BUSTUB_ASSERT(0 <= frame_id && frame_id <= static_cast<int32_t>(replacer_size_), "Invalid frame_id!");
   BUSTUB_ASSERT(node_store_.find(frame_id) != node_store_.end(), "The LRUKNode must exist!");
 
   if(node_store_[frame_id].GetEvictable() ^ set_evictable){
@@ -114,7 +113,6 @@ void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
 }
 
 void LRUKReplacer::Remove(frame_id_t frame_id) {
-
   std::lock_guard<std::mutex> lock(latch_);
   
   if(node_store_.find(frame_id) == node_store_.end()){
