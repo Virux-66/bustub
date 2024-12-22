@@ -14,6 +14,12 @@ BasicPageGuard::BasicPageGuard(BasicPageGuard &&that) noexcept {
 }
 
 void BasicPageGuard::Drop() {
+  if(page_ == nullptr || bpm_ == nullptr){
+    return;
+  }
+  BUSTUB_ASSERT(page_ != nullptr, "The page_ must be nullptr.");
+  BUSTUB_ASSERT(bpm_ != nullptr, "The bpm_ must be nullptr.");
+
   auto page_id = page_->GetPageId();
   bpm_->UnpinPage(page_id, is_dirty_);
   // The following assert can't be guarantee due to this function might be called
@@ -47,12 +53,19 @@ ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept{
 
 auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & {
   if(this != &that){
+    guard_.page_->RUnlatch();
     guard_ = std::move(that.guard_);
   }
   return *this;
 }
 
 void ReadPageGuard::Drop() {
+  if(guard_.page_ == nullptr || guard_.bpm_ == nullptr){
+    return;
+  }
+  BUSTUB_ASSERT(guard_.page_ != nullptr, "The page_ must be nullptr.");
+  BUSTUB_ASSERT(guard_.bpm_ != nullptr, "The bpm_ must be nullptr.");
+
   guard_.page_->RUnlatch();
   guard_.Drop();
 }
@@ -67,12 +80,19 @@ WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept{
 
 auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard & {
   if(this != &that){
+    guard_.page_->WUnlatch();
     guard_ = std::move(that.guard_);
   }
   return *this;
 }
 
 void WritePageGuard::Drop() {
+  if(guard_.page_ == nullptr || guard_.bpm_ == nullptr){
+    return;
+  }
+  BUSTUB_ASSERT(guard_.page_ != nullptr, "The page_ must be nullptr.");
+  BUSTUB_ASSERT(guard_.bpm_ != nullptr, "The bpm_ must be nullptr.");
+
   guard_.page_->WUnlatch();
   guard_.Drop();
 }
